@@ -11,6 +11,7 @@
  * วิธีหา: Apps Script Editor → Deploy → Manage deployments → คัดลอก "Web app URL"
  */
 var API_BASE_URL = 'https://script.google.com/macros/s/AKfycbxIMAkjisB3GzQ2wy5uE3eP2s7cfCpBvw5j3c8uk75_8eDwkrkApJ-l95pOaNMNVCQ/exec';
+
 /**
  * เรียก Apps Script API หนึ่งฟังก์ชัน
  * ใช้ GET เสมอ (ไม่ใช่ POST) ...
