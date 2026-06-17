@@ -1,3 +1,14 @@
+  @font-face {
+    font-family: 'Pinyin Sans';
+    src: url('fonts/PinyinSans.woff') format('woff');
+    font-display: swap;
+  }
+  @font-face {
+    font-family: 'AppKaiTi';
+    src: url('fonts/KaiTi-subset.woff') format('woff');
+    font-display: swap;
+  }
+
   :root {
     --ink: #1F2430;
     --ink-soft: #545B6B;
@@ -37,7 +48,7 @@
     letter-spacing: 0.2px;
   }
 
-  .hanzi { font-family: 'Noto Sans SC', sans-serif; }
+  .hanzi { font-family: 'AppKaiTi', 'KaiTi', 'STKaiti', 'Kaiti SC', 'Kaiti TC', 'Noto Sans SC', sans-serif; }
 
   button { font-family: 'Sarabun', sans-serif; cursor: pointer; }
 
@@ -221,7 +232,7 @@
     padding: 36px 16px 16px; text-align: center; cursor: pointer; transition: border-color .15s ease; position: relative;
   }
   .item-card:hover { border-color: var(--seal); }
-  .item-card .item-type { font-family: 'Kanit', sans-serif; font-size: 24px; font-weight: 600; }
+  .item-card .item-type { font-family: 'Pinyin Sans', 'Kanit', sans-serif; font-size: 24px; font-weight: 600; }
   .item-card .item-thai-sound { font-size: 13.5px; color: var(--seal-dark); margin-top: 2px; }
   .item-listen-btn {
     position: absolute; top: 8px; left: 8px; width: 28px; height: 28px; border-radius: 50%;
@@ -256,7 +267,7 @@
   .modal-close-x:hover { color: var(--seal); }
 
   .practice-head { margin-bottom: 6px; }
-  .practice-target-pinyin { font-family: 'Kanit', sans-serif; font-size: 28px; font-weight: 600; }
+  .practice-target-pinyin { font-family: 'Pinyin Sans', 'Kanit', sans-serif; font-size: 28px; font-weight: 600; }
   .practice-thai-sound { font-size: 14.5px; color: var(--seal-dark); margin-top: 2px; }
 
   .diagram-row { display: flex; flex-direction: column; align-items: center; margin: 12px 0 4px; }
@@ -270,8 +281,8 @@
   .example-box { background: var(--seal-tint); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 16px; text-align: left; }
   .example-label { font-size: 11.5px; color: var(--seal-dark); font-weight: 500; margin-bottom: 4px; }
   .example-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-  .example-hanzi { font-family: 'Noto Sans SC', sans-serif; font-size: 24px; }
-  .example-pinyin { font-family: 'Kanit', sans-serif; font-size: 15px; color: var(--ink); }
+  .example-hanzi { font-family: 'AppKaiTi', 'KaiTi', 'STKaiti', 'Kaiti SC', 'Kaiti TC', 'Noto Sans SC', sans-serif; font-size: 24px; }
+  .example-pinyin { font-family: 'Pinyin Sans', 'Kanit', sans-serif; font-size: 15px; color: var(--ink); }
   .example-meaning { font-size: 13px; color: var(--ink-soft); }
 
   .practice-controls { display: flex; gap: 10px; margin-bottom: 10px; }
