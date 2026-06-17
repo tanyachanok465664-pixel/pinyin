@@ -887,6 +887,7 @@ function escapeHtml(str) {
   }
 
   function stopAnyPlayback() {
+    PhoneticState.speechRequestId = (PhoneticState.speechRequestId || 0) + 1;
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     if (PhoneticState.currentAudioEl) { PhoneticState.currentAudioEl.pause(); }
   }
@@ -896,11 +897,6 @@ function escapeHtml(str) {
     stopAnyPlayback();
     var iconOnly = !!(opts && opts.iconOnly);
     var originalLabel = btn ? btn.textContent : '';
-    var utter = new SpeechSynthesisUtterance(text);
-    utter.lang = 'zh-CN';
-    utter.rate = 0.8;
-    var voice = pickBestChineseVoice();
-    if (voice) utter.voice = voice;
 
     if (btn) {
       if (iconOnly) btn.classList.add('is-playing');
@@ -911,9 +907,23 @@ function escapeHtml(str) {
       if (iconOnly) btn.classList.remove('is-playing');
       else btn.textContent = originalLabel;
     }
-    utter.onend = restore;
-    utter.onerror = restore;
-    window.speechSynthesis.speak(utter);
+
+    // หน่วงเล็กน้อยก่อนเล่นเสียงใหม่จริง เพราะ speechSynthesis.cancel() ในหลายเบราว์เซอร์ (เช่น Chrome)
+    // ไม่เคลียร์คำขอเดิมทันทีแบบ synchronous ถ้าเรียก speak() ติดกันจะได้ยินเสียงของรายการก่อนหน้าค้างอยู่แทน
+    PhoneticState.speechRequestId = (PhoneticState.speechRequestId || 0) + 1;
+    var requestId = PhoneticState.speechRequestId;
+    setTimeout(function () {
+      if (requestId !== PhoneticState.speechRequestId) return; // มีคำขอใหม่กว่าเข้ามาแทนที่แล้ว ไม่ต้องพูดคำขอนี้
+      window.speechSynthesis.cancel();
+      var utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'zh-CN';
+      utter.rate = 0.8;
+      var voice = pickBestChineseVoice();
+      if (voice) utter.voice = voice;
+      utter.onend = restore;
+      utter.onerror = restore;
+      window.speechSynthesis.speak(utter);
+    }, 80);
   }
 
   function playExampleAudio() {
