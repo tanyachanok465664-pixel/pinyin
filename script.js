@@ -1,5 +1,4 @@
-/**var API_BASE_URL = 'https://script.google.com/macros/s/AKfycbxIMAkjisB3GzQ2wy5uE3eP2s7cfCpBvw5j3c8uk75_8eDwkrkApJ-l95pOaNMNVCQ/exec';
-
+/**
  * AI PINYIN LAB — script.js
  * ฟรอนต์เอนด์แบบ static host บน GitHub Pages
  * Apps Script ทำหน้าที่เป็น JSON API เท่านั้น (ไม่มีการเสิร์ฟ HTML จากฝั่งเซิร์ฟเวอร์อีกต่อไป)
@@ -11,7 +10,9 @@
  * แก้ค่านี้เป็น URL ของเว็บแอป Apps Script ที่ deploy แล้ว (ลงท้ายด้วย /exec)
  * วิธีหา: Apps Script Editor → Deploy → Manage deployments → คัดลอก "Web app URL"
  */
-var API_BASE_URL = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE/exec';
+var API_BASE_URL = 'https://script.google.com/macros/s/AKfycbxIMAkjisB3GzQ2wy5uE3eP2s7cfCpBvw5j3c8uk75_8eDwkrkApJ-l95pOaNMNVCQ/exec';
+
+ * AI PINYIN LAB — script.js
 
 /**
  * เรียก Apps Script API หนึ่งฟังก์ชัน
