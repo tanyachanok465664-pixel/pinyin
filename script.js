@@ -649,11 +649,19 @@ function escapeHtml(str) {
       var subLabel = isTones ? escapeHtml(it.exampleWord || '-') : escapeHtml(it.thaiSound || '-');
       return '<div class="item-card' + practiced + '" id="item-card-' + idx + '" onclick="openPracticeModal(' + idx + ')">' +
         '<span class="item-practiced-dot"></span>' +
+        '<button class="item-listen-btn" onclick="event.stopPropagation(); playItemAudio(' + idx + ', this)" aria-label="ฟังเสียง" title="ฟังเสียง">🔊</button>' +
         '<div class="item-type">' + escapeHtml(typeLabel) + '</div>' +
         '<div class="item-thai-sound">' + subLabel + '</div>' +
-        '<div class="item-meaning">' + escapeHtml(it.exampleMeaning || 'ไม่มีคำแปล') + '</div>' +
         '</div>';
     }).join('');
+  }
+
+  /** ปุ่มฟังเสียงด่วนจากการ์ดในกริด ไม่ต้องเปิดโมดัลรายละเอียดก่อน */
+  function playItemAudio(idx, btn) {
+    var item = PhoneticState.items[idx];
+    if (!item) return;
+    var textToSpeak = PhoneticState.currentModule === 'Tones' ? (item.exampleWord || item.pinyin) : item.pinyin;
+    speakText(textToSpeak, btn, { iconOnly: true });
   }
 
   function openPracticeModal(idx) {
@@ -714,21 +722,53 @@ function escapeHtml(str) {
     PhoneticState.isRecording = false;
   }
 
+  /* เลือกเสียงพากย์ภาษาจีนที่คุณภาพดีที่สุดที่เบราว์เซอร์มีให้ (บางเบราว์เซอร์มีหลายเสียงให้เลือก
+     เสียงที่มาจาก Google/Microsoft มักจะฟังเป็นธรรมชาติกว่าเสียง default ของระบบปฏิบัติการ) */
+  var _cachedVoices = [];
+  function refreshVoiceCache() {
+    if ('speechSynthesis' in window) _cachedVoices = window.speechSynthesis.getVoices();
+  }
+  if ('speechSynthesis' in window) {
+    refreshVoiceCache();
+    window.speechSynthesis.onvoiceschanged = refreshVoiceCache;
+  }
+  function pickBestChineseVoice() {
+    if (_cachedVoices.length === 0) refreshVoiceCache();
+    var zhVoices = _cachedVoices.filter(function (v) {
+      return v.lang && v.lang.toLowerCase().indexOf('zh') === 0;
+    });
+    if (zhVoices.length === 0) return null;
+    var preferred = zhVoices.filter(function (v) { return /google|microsoft|natural|enhanced|online/i.test(v.name); });
+    return preferred[0] || zhVoices[0];
+  }
+
   function stopAnyPlayback() {
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     if (PhoneticState.currentAudioEl) { PhoneticState.currentAudioEl.pause(); }
   }
 
-  function speakText(text, btn) {
+  function speakText(text, btn, opts) {
     if (!('speechSynthesis' in window)) { showToast('เบราว์เซอร์นี้ไม่รองรับการอ่านออกเสียงตัวอย่าง'); return; }
     stopAnyPlayback();
-    var originalLabel = btn.textContent;
+    var iconOnly = !!(opts && opts.iconOnly);
+    var originalLabel = btn ? btn.textContent : '';
     var utter = new SpeechSynthesisUtterance(text);
     utter.lang = 'zh-CN';
-    utter.rate = 0.85;
-    btn.textContent = 'กำลังเล่น...';
-    utter.onend = function () { btn.textContent = originalLabel; };
-    utter.onerror = function () { btn.textContent = originalLabel; };
+    utter.rate = 0.8;
+    var voice = pickBestChineseVoice();
+    if (voice) utter.voice = voice;
+
+    if (btn) {
+      if (iconOnly) btn.classList.add('is-playing');
+      else btn.textContent = 'กำลังเล่น...';
+    }
+    function restore() {
+      if (!btn) return;
+      if (iconOnly) btn.classList.remove('is-playing');
+      else btn.textContent = originalLabel;
+    }
+    utter.onend = restore;
+    utter.onerror = restore;
     window.speechSynthesis.speak(utter);
   }
 
