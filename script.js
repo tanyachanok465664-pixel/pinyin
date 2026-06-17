@@ -723,3 +723,4 @@ function escapeHtml(str) {
     stopAnyPlayback();
     closeModal('modal-practice');
   }
+var API_BASE_URL = 'https://script.google.com/macros/s/AKfycbxIMAkjisB3GzQ2wy5uE3eP2s7cfCpBvw5j3c8uk75_8eDwkrkApJ-l95pOaNMNVCQ/exec';
