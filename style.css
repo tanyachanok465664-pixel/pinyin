@@ -66,6 +66,14 @@
     font-size: 15px; color: var(--ink);
   }
   .field input:focus, .field select:focus { outline: 2px solid var(--seal); outline-offset: 1px; }
+  .field-hint { font-size: 12px; color: var(--ink-soft); margin: 5px 0 0; }
+
+  .auth-switch { margin-top: 18px; text-align: center; font-size: 13.5px; color: var(--ink-soft); }
+  .link-btn {
+    background: transparent; border: none; color: var(--seal); font-weight: 500; font-size: 13.5px;
+    padding: 0; margin-left: 4px; text-decoration: underline;
+  }
+  .link-btn:hover { color: var(--seal-dark); }
 
   /* ---------- หน้า Login ---------- */
   .login-screen {
@@ -210,12 +218,18 @@
   .item-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
   .item-card {
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
-    padding: 16px; text-align: center; cursor: pointer; transition: border-color .15s ease; position: relative;
+    padding: 36px 16px 16px; text-align: center; cursor: pointer; transition: border-color .15s ease; position: relative;
   }
   .item-card:hover { border-color: var(--seal); }
   .item-card .item-type { font-family: 'Kanit', sans-serif; font-size: 24px; font-weight: 600; }
   .item-card .item-thai-sound { font-size: 13.5px; color: var(--seal-dark); margin-top: 2px; }
-  .item-card .item-meaning { font-size: 12px; color: var(--ink-soft); margin-top: 6px; }
+  .item-listen-btn {
+    position: absolute; top: 8px; left: 8px; width: 28px; height: 28px; border-radius: 50%;
+    border: none; background: var(--seal-tint); color: var(--seal-dark); font-size: 13px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 0;
+  }
+  .item-listen-btn:hover { background: var(--seal); color: #fff; }
+  .item-listen-btn.is-playing { background: var(--jade); color: #fff; }
   .item-practiced-dot {
     position: absolute; top: 10px; right: 10px; width: 8px; height: 8px; border-radius: 50%;
     background: var(--jade); display: none;
