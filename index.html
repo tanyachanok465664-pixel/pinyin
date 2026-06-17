@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@500;600;700&family=Sarabun:wght@400;500;600&family=Noto+Sans+SC:wght@500&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 
@@ -225,8 +225,8 @@
     </div>
 
     <div class="sub-tabs">
-      <button class="sub-tab-btn active" onclick="switchPhoneticModule('Initials')">声母 พยัญชนะ</button>
-      <button class="sub-tab-btn" onclick="switchPhoneticModule('Finals')">韵母 สระเดี่ยว/สระผสม</button>
+      <button class="sub-tab-btn active" onclick="switchPhoneticModule('Initials')">声母 พยัญชนะต้น</button>
+      <button class="sub-tab-btn" onclick="switchPhoneticModule('Finals')">韵母 สระ/ส่วนท้าย</button>
       <button class="sub-tab-btn" onclick="switchPhoneticModule('Tones')">声调 วรรณยุกต์</button>
     </div>
 
@@ -309,6 +309,7 @@
     <div class="tabs">
       <button class="tab-btn active" onclick="switchTeacherTab('overview')">ภาพรวม</button>
       <button class="tab-btn" onclick="switchTeacherTab('students')">จัดการนักเรียน</button>
+      <button class="tab-btn" onclick="switchTeacherTab('phonetic-items')">คลังหน่วยเสียง</button>
       <button class="tab-btn is-locked" onclick="showLockedNotice()">วิเคราะห์การเรียนรู้</button>
       <button class="tab-btn is-locked" onclick="showLockedNotice()">งานวิจัย</button>
       <button class="tab-btn is-locked" onclick="showLockedNotice()">รายงาน PA</button>
@@ -353,6 +354,34 @@
         <div class="empty-state" id="student-empty-state" style="display:none">ยังไม่มีนักเรียนในระบบ กดปุ่ม "เพิ่มนักเรียน" เพื่อเริ่มต้น</div>
       </div>
     </div>
+
+    <!-- คลังหน่วยเสียง -->
+    <div class="tab-panel" id="panel-phonetic-items">
+      <div class="panel-head">
+        <h2>คลังหน่วยเสียง (Phonetic Lab)</h2>
+        <button class="btn btn-primary" onclick="openAddPracticeItemModal()">+ เพิ่มรายการใหม่</button>
+      </div>
+      <div class="field" style="max-width:220px; margin-bottom:14px;">
+        <label for="pi-filter-module">กรองตามหมวด</label>
+        <select id="pi-filter-module" onchange="renderPracticeItemsAdminTable()">
+          <option value="">ทั้งหมด</option>
+          <option value="Initials">พยัญชนะต้น (Initials)</option>
+          <option value="Finals">สระ/ส่วนท้าย (Finals)</option>
+          <option value="Tones">วรรณยุกต์ (Tones)</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ItemID</th><th>หมวด</th><th>Type</th><th>Pinyin</th><th>คำอ่านไทย</th><th>คำตัวอย่าง</th><th>จัดการ</th>
+            </tr>
+          </thead>
+          <tbody id="pi-table-body"></tbody>
+        </table>
+        <div class="empty-state" id="pi-empty-state" style="display:none">ยังไม่มีข้อมูลในหมวดนี้</div>
+      </div>
+    </div>
   </div>
 
   <!-- โมดัลเพิ่มนักเรียน -->
@@ -388,10 +417,89 @@
       <button class="btn btn-primary btn-block" onclick="closeModal('modal-credentials')">รับทราบ</button>
     </div>
   </div>
+
+  <!-- โมดัลเพิ่ม/แก้ไขรายการในคลังหน่วยเสียง -->
+  <div class="modal-overlay" id="modal-edit-practice-item">
+    <div class="modal-card modal-card-wide">
+      <h3 id="pi-modal-title">เพิ่มรายการใหม่</h3>
+      <form id="form-edit-practice-item" onsubmit="handleSavePracticeItem(event)">
+        <input type="hidden" id="pi-item-id">
+
+        <div class="field">
+          <label for="pi-module">หมวด</label>
+          <select id="pi-module" required>
+            <option value="Initials">พยัญชนะต้น (Initials)</option>
+            <option value="Finals">สระ/ส่วนท้าย (Finals)</option>
+            <option value="Tones">วรรณยุกต์ (Tones)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="pi-type">Type (เช่น b, an, Tone1)</label>
+          <input type="text" id="pi-type" required>
+        </div>
+        <div class="field">
+          <label for="pi-pinyin">Pinyin (เช่น bā)</label>
+          <input type="text" id="pi-pinyin" required>
+        </div>
+        <div class="field">
+          <label for="pi-tone-number">เลขวรรณยุกต์ (เว้นว่างได้ ระบบคำนวณจากเครื่องหมายในพินอินให้อัตโนมัติ)</label>
+          <input type="number" id="pi-tone-number" min="0" max="5">
+        </div>
+        <div class="field">
+          <label for="pi-thai-sound">คำอ่านเทียบเสียงไทย (เช่น โป, อัน)</label>
+          <input type="text" id="pi-thai-sound">
+        </div>
+        <div class="field">
+          <label for="pi-articulation">คำอธิบายการออกเสียง (ตำแหน่งลิ้น/ริมฝีปาก/กระแสลม)</label>
+          <textarea id="pi-articulation" rows="3"></textarea>
+        </div>
+        <div class="field">
+          <label for="pi-diagram-key">DiagramKey (กุญแจไดอะแกรม)</label>
+          <input type="text" id="pi-diagram-key" placeholder="เช่น bilabial-unaspirated, open-a, tone-1">
+          <p class="field-hint">พยัญชนะต้น: [ฐานกรณ์]-[ลักษณะ] เช่น bilabial/alveolar/velar/palatal/retroflex/dental/glide-i/glide-u ต่อด้วย unaspirated/aspirated/nasal/fricative/lateral/approximant — สระ: open-a, rounded-o, mid-e, close-i, rounded-u, diphthong-xx, nasal-n-x, nasal-ng-x — วรรณยุกต์: tone-1 ถึง tone-5 — เว้นว่างได้ถ้าไม่ทราบ (จะไม่มีไดอะแกรมแสดง)</p>
+        </div>
+        <div class="field">
+          <label for="pi-example-word">คำตัวอย่าง (ตัวอักษรจีน)</label>
+          <input type="text" id="pi-example-word">
+        </div>
+        <div class="field">
+          <label for="pi-example-pinyin">พินอินของคำตัวอย่าง</label>
+          <input type="text" id="pi-example-pinyin">
+        </div>
+        <div class="field">
+          <label for="pi-example-meaning">ความหมายของคำตัวอย่าง</label>
+          <input type="text" id="pi-example-meaning">
+        </div>
+        <div class="field">
+          <label for="pi-audio-url">AudioURL (ไฟล์เสียงหน่วยเสียง เช่น audio/b.mp3 — เว้นว่างได้ จะใช้เสียงสังเคราะห์แทน)</label>
+          <input type="text" id="pi-audio-url">
+        </div>
+        <div class="field">
+          <label for="pi-example-audio-url">ExampleAudioURL (ไฟล์เสียงคำตัวอย่าง — เว้นว่างได้)</label>
+          <input type="text" id="pi-example-audio-url">
+        </div>
+        <div class="field">
+          <label for="pi-image-url">ImageURL (เว้นว่างได้)</label>
+          <input type="text" id="pi-image-url">
+        </div>
+        <div class="field">
+          <label for="pi-level">Level</label>
+          <input type="number" id="pi-level" min="1" value="1">
+        </div>
+
+        <div style="display:flex; gap:10px; margin-top:6px;">
+          <button type="button" class="btn btn-ghost" id="pi-delete-btn" style="display:none; color:var(--rose);" onclick="handleDeletePracticeItem()">ลบรายการนี้</button>
+          <span style="flex:1"></span>
+          <button type="button" class="btn btn-ghost" onclick="closeModal('modal-edit-practice-item')">ยกเลิก</button>
+          <button type="submit" class="btn btn-primary">บันทึก</button>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>
 
   <div id="toast"></div>
 
-  <script src="script.js?v=4"></script>
+  <script src="script.js?v=5"></script>
 </body>
 </html>
