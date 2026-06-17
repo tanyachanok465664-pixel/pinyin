@@ -1,4 +1,5 @@
-/**
+/**var API_BASE_URL = 'https://script.google.com/macros/s/AKfycbxIMAkjisB3GzQ2wy5uE3eP2s7cfCpBvw5j3c8uk75_8eDwkrkApJ-l95pOaNMNVCQ/exec';
+
  * AI PINYIN LAB — script.js
  * ฟรอนต์เอนด์แบบ static host บน GitHub Pages
  * Apps Script ทำหน้าที่เป็น JSON API เท่านั้น (ไม่มีการเสิร์ฟ HTML จากฝั่งเซิร์ฟเวอร์อีกต่อไป)
@@ -723,4 +724,3 @@ function escapeHtml(str) {
     stopAnyPlayback();
     closeModal('modal-practice');
   }
-var API_BASE_URL = 'https://script.google.com/macros/s/AKfycbxIMAkjisB3GzQ2wy5uE3eP2s7cfCpBvw5j3c8uk75_8eDwkrkApJ-l95pOaNMNVCQ/exec';
