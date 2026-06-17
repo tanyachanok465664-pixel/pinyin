@@ -10,22 +10,50 @@
  * แก้ค่านี้เป็น URL ของเว็บแอป Apps Script ที่ deploy แล้ว (ลงท้ายด้วย /exec)
  * วิธีหา: Apps Script Editor → Deploy → Manage deployments → คัดลอก "Web app URL"
  */
-var API_BASE_URL = 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE/exec';
+var API_BASE_URL = 'https://script.google.com/macros/s/AKfycbxIMAkjisB3GzQ2wy5uE3eP2s7cfCpBvw5j3c8uk75_8eDwkrkApJ-l95pOaNMNVCQ/exec';
 
 /**
- * เรียก Apps Script API หนึ่งฟังก์ชัน
- * ใช้ GET เสมอ (ไม่ใช่ POST) เพื่อเลี่ยง 2 ปัญหาที่พบบ่อยกับ Apps Script ข้าม origin:
- *   1) CORS preflight ค้าง — GET แบบไม่มี custom header ถือเป็น "simple request" เสมอ ไม่ trigger preflight
- *   2) Apps Script เปลี่ยน POST เป็น GET ตอน redirect ข้าม origน ทำให้ body ของ POST หายไปกลางทาง
+ * เรียก Apps Script API หนึ่งฟังก์ชัน — ใช้เทคนิค JSONP (โหลดผ่าน <script> tag)
+ * ไม่ใช้ fetch() เพราะพบว่า Apps Script web app ตอบกลับ fetch() ข้าม origin ด้วยหน้า
+ * error ของ Google เอง (HTTP 404) ระหว่าง redirect ภายในของระบบ ทั้งที่ URL เดียวกัน
+ * เปิดตรง ๆ ในเบราว์เซอร์ใช้ได้ปกติ — การโหลดผ่าน <script> tag ไม่ติดปัญหานี้ เพราะ
+ * ไม่ถูกจำกัดด้วย CORS แบบเดียวกับ fetch()/XHR
  * คืนค่าเป็น Promise ที่ resolve เป็น JSON เสมอ (ทั้งกรณี success:true และ success:false ของ business logic)
- * จะ reject (เข้า .catch) เฉพาะปัญหาระดับเครือข่าย/เซิร์ฟเวอร์เท่านั้น
+ * จะ reject (เข้า .catch) เฉพาะปัญหาระดับเครือข่าย/หมดเวลาเท่านั้น
  */
+var _jsonpCounter = 0;
+
 function callApi(action, payload) {
-  var url = API_BASE_URL + '?action=' + encodeURIComponent(action) +
-    '&payload=' + encodeURIComponent(JSON.stringify(payload || {}));
-  return fetch(url).then(function (res) {
-    if (!res.ok) throw new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ (HTTP ' + res.status + ')');
-    return res.json();
+  return new Promise(function (resolve, reject) {
+    var callbackName = '_aiplCallback' + (_jsonpCounter++);
+    var script = document.createElement('script');
+
+    function cleanup() {
+      clearTimeout(timeoutId);
+      delete window[callbackName];
+      if (script.parentNode) script.parentNode.removeChild(script);
+    }
+
+    var timeoutId = setTimeout(function () {
+      cleanup();
+      reject(new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ (หมดเวลารอการตอบกลับ)'));
+    }, 15000);
+
+    window[callbackName] = function (result) {
+      cleanup();
+      resolve(result);
+    };
+
+    script.onerror = function () {
+      cleanup();
+      reject(new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ'));
+    };
+
+    var url = API_BASE_URL + '?action=' + encodeURIComponent(action) +
+      '&payload=' + encodeURIComponent(JSON.stringify(payload || {})) +
+      '&callback=' + callbackName;
+    script.src = url;
+    document.head.appendChild(script);
   });
 }
 
@@ -70,14 +98,32 @@ function showView(name) {
   document.getElementById('view-' + name).classList.add('active');
 }
 
-/* ---------------- Login ---------------- */
+/* ---------------- Login / Register ---------------- */
+
+var AuthState = { role: 'student', mode: 'login' };
 
 function switchLoginRole(role) {
+  AuthState.role = role;
   document.getElementById('tab-student').classList.toggle('active', role === 'student');
   document.getElementById('tab-teacher').classList.toggle('active', role === 'teacher');
-  document.getElementById('form-student-login').style.display = role === 'student' ? 'block' : 'none';
-  document.getElementById('form-teacher-login').style.display = role === 'teacher' ? 'block' : 'none';
   hideLoginError();
+  updateAuthFormVisibility();
+}
+
+function toggleAuthMode() {
+  AuthState.mode = AuthState.mode === 'login' ? 'register' : 'login';
+  hideLoginError();
+  updateAuthFormVisibility();
+}
+
+function updateAuthFormVisibility() {
+  document.getElementById('form-student-login').style.display = (AuthState.role === 'student' && AuthState.mode === 'login') ? 'block' : 'none';
+  document.getElementById('form-teacher-login').style.display = (AuthState.role === 'teacher' && AuthState.mode === 'login') ? 'block' : 'none';
+  document.getElementById('form-student-register').style.display = (AuthState.role === 'student' && AuthState.mode === 'register') ? 'block' : 'none';
+  document.getElementById('form-teacher-register').style.display = (AuthState.role === 'teacher' && AuthState.mode === 'register') ? 'block' : 'none';
+
+  document.getElementById('auth-switch-text').textContent = AuthState.mode === 'login' ? 'ยังไม่มีบัญชี?' : 'มีบัญชีอยู่แล้ว?';
+  document.getElementById('auth-switch-btn').textContent = AuthState.mode === 'login' ? 'สร้างบัญชีใหม่' : 'เข้าสู่ระบบ';
 }
 
 function showLoginError(message) {
@@ -114,6 +160,41 @@ function handleTeacherLogin(e) {
     .catch(function (err) { onLoginFailure(err, btn, 'เข้าสู่ระบบ'); });
 }
 
+function handleStudentRegister(e) {
+  e.preventDefault();
+  hideLoginError();
+  var fullName = document.getElementById('reg-student-name').value.trim();
+  var classRoom = document.getElementById('reg-student-class').value.trim();
+  var username = document.getElementById('reg-student-username').value.trim();
+  var pw = document.getElementById('reg-student-password').value;
+  var pwConfirm = document.getElementById('reg-student-password-confirm').value;
+
+  if (pw !== pwConfirm) { showLoginError('รหัสผ่านและการยืนยันรหัสผ่านไม่ตรงกัน'); return; }
+
+  var btn = document.getElementById('student-register-btn');
+  btn.disabled = true; btn.textContent = 'กำลังสร้างบัญชี...';
+  callApi('registerStudent', { fullName: fullName, classRoom: classRoom, username: username, password: pw })
+    .then(function (res) { onLoginResult(res, btn, 'สร้างบัญชี'); })
+    .catch(function (err) { onLoginFailure(err, btn, 'สร้างบัญชี'); });
+}
+
+function handleTeacherRegister(e) {
+  e.preventDefault();
+  hideLoginError();
+  var fullName = document.getElementById('reg-teacher-name').value.trim();
+  var username = document.getElementById('reg-teacher-username').value.trim();
+  var pw = document.getElementById('reg-teacher-password').value;
+  var pwConfirm = document.getElementById('reg-teacher-password-confirm').value;
+
+  if (pw !== pwConfirm) { showLoginError('รหัสผ่านและการยืนยันรหัสผ่านไม่ตรงกัน'); return; }
+
+  var btn = document.getElementById('teacher-register-btn');
+  btn.disabled = true; btn.textContent = 'กำลังสร้างบัญชี...';
+  callApi('registerTeacher', { fullName: fullName, username: username, password: pw })
+    .then(function (res) { onLoginResult(res, btn, 'สร้างบัญชี'); })
+    .catch(function (err) { onLoginFailure(err, btn, 'สร้างบัญชี'); });
+}
+
 function onLoginResult(res, btn, label) {
   btn.disabled = false; btn.textContent = label;
   if (!res.success) { showLoginError(res.message); return; }
@@ -148,6 +229,11 @@ function handleLogout() {
   AppState.token = null; AppState.user = null;
   document.getElementById('form-student-login').reset();
   document.getElementById('form-teacher-login').reset();
+  document.getElementById('form-student-register').reset();
+  document.getElementById('form-teacher-register').reset();
+  AuthState.role = 'student'; AuthState.mode = 'login';
+  switchLoginRole('student');
+  updateAuthFormVisibility();
   showView('login');
 }
 
