@@ -265,6 +265,7 @@ function switchTeacherTab(name) {
   event.currentTarget.classList.add('active');
   document.getElementById('panel-' + name).classList.add('active');
   if (name === 'students') loadStudentList();
+  if (name === 'phonetic-items') loadPracticeItemsAdmin();
 }
 
 function showLockedNotice() {
@@ -354,6 +355,130 @@ function resetPassword(studentId) {
 
 function closeModal(id) {
   document.getElementById(id).classList.remove('show');
+}
+
+/* ---------------- คลังหน่วยเสียง (จัดการโดยครู) ---------------- */
+
+var PracticeItemsAdminState = { items: [] };
+
+function loadPracticeItemsAdmin() {
+  callApi('getPracticeItemsAdmin', { token: AppState.token })
+    .then(function (res) {
+      if (!res.success) { onApiError(res); return; }
+      PracticeItemsAdminState.items = res.items;
+      renderPracticeItemsAdminTable();
+    })
+    .catch(onApiError);
+}
+
+function renderPracticeItemsAdminTable() {
+  var filterVal = document.getElementById('pi-filter-module').value;
+  var tbody = document.getElementById('pi-table-body');
+  var emptyState = document.getElementById('pi-empty-state');
+  var items = PracticeItemsAdminState.items.filter(function (i) {
+    return !filterVal || i.Module === filterVal;
+  });
+
+  if (items.length === 0) {
+    tbody.innerHTML = ''; emptyState.style.display = 'block'; return;
+  }
+  emptyState.style.display = 'none';
+  tbody.innerHTML = items.map(function (i) {
+    return '<tr>' +
+      '<td>' + escapeHtml(i.ItemID) + '</td>' +
+      '<td>' + escapeHtml(i.Module) + '</td>' +
+      '<td>' + escapeHtml(i.Type) + '</td>' +
+      '<td>' + escapeHtml(i.Pinyin) + '</td>' +
+      '<td>' + escapeHtml(i.ThaiSound || '-') + '</td>' +
+      '<td>' + escapeHtml(i.ExampleWord || '-') + '</td>' +
+      '<td class="row-actions">' +
+        '<button class="btn btn-ghost" onclick="openEditPracticeItemModal(\'' + i.ItemID + '\')">แก้ไข</button>' +
+      '</td>' +
+    '</tr>';
+  }).join('');
+}
+
+function openAddPracticeItemModal() {
+  document.getElementById('form-edit-practice-item').reset();
+  document.getElementById('pi-item-id').value = '';
+  document.getElementById('pi-modal-title').textContent = 'เพิ่มรายการใหม่';
+  document.getElementById('pi-delete-btn').style.display = 'none';
+  document.getElementById('pi-level').value = 1;
+  document.getElementById('modal-edit-practice-item').classList.add('show');
+}
+
+function openEditPracticeItemModal(itemId) {
+  var item = PracticeItemsAdminState.items.find(function (i) { return i.ItemID === itemId; });
+  if (!item) { showToast('ไม่พบรายการนี้'); return; }
+
+  document.getElementById('form-edit-practice-item').reset();
+  document.getElementById('pi-item-id').value = item.ItemID;
+  document.getElementById('pi-modal-title').textContent = 'แก้ไขรายการ: ' + item.ItemID;
+  document.getElementById('pi-delete-btn').style.display = 'inline-block';
+
+  document.getElementById('pi-module').value = item.Module || 'Initials';
+  document.getElementById('pi-type').value = item.Type || '';
+  document.getElementById('pi-pinyin').value = item.Pinyin || '';
+  document.getElementById('pi-tone-number').value = item.ToneNumber || '';
+  document.getElementById('pi-thai-sound').value = item.ThaiSound || '';
+  document.getElementById('pi-articulation').value = item.Articulation || '';
+  document.getElementById('pi-diagram-key').value = item.DiagramKey || '';
+  document.getElementById('pi-example-word').value = item.ExampleWord || '';
+  document.getElementById('pi-example-pinyin').value = item.ExamplePinyin || '';
+  document.getElementById('pi-example-meaning').value = item.ExampleMeaning || '';
+  document.getElementById('pi-audio-url').value = item.AudioURL || '';
+  document.getElementById('pi-example-audio-url').value = item.ExampleAudioURL || '';
+  document.getElementById('pi-image-url').value = item.ImageURL || '';
+  document.getElementById('pi-level').value = item.Level || 1;
+
+  document.getElementById('modal-edit-practice-item').classList.add('show');
+}
+
+function collectPracticeItemFormFields() {
+  return {
+    Module: document.getElementById('pi-module').value,
+    Type: document.getElementById('pi-type').value.trim(),
+    Pinyin: document.getElementById('pi-pinyin').value.trim(),
+    ToneNumber: document.getElementById('pi-tone-number').value || '',
+    ThaiSound: document.getElementById('pi-thai-sound').value.trim(),
+    Articulation: document.getElementById('pi-articulation').value.trim(),
+    DiagramKey: document.getElementById('pi-diagram-key').value.trim(),
+    ExampleWord: document.getElementById('pi-example-word').value.trim(),
+    ExamplePinyin: document.getElementById('pi-example-pinyin').value.trim(),
+    ExampleMeaning: document.getElementById('pi-example-meaning').value.trim(),
+    AudioURL: document.getElementById('pi-audio-url').value.trim(),
+    ExampleAudioURL: document.getElementById('pi-example-audio-url').value.trim(),
+    ImageURL: document.getElementById('pi-image-url').value.trim(),
+    Level: document.getElementById('pi-level').value || 1
+  };
+}
+
+function handleSavePracticeItem(e) {
+  e.preventDefault();
+  var itemId = document.getElementById('pi-item-id').value;
+  var fields = collectPracticeItemFormFields();
+  var action = itemId ? 'updatePracticeItem' : 'addPracticeItem';
+  var payload = itemId ? { token: AppState.token, itemId: itemId, fields: fields } : { token: AppState.token, fields: fields };
+
+  callApi(action, payload).then(function (res) {
+    if (!res.success) { showToast(res.message); return; }
+    closeModal('modal-edit-practice-item');
+    showToast(itemId ? 'บันทึกการแก้ไขแล้ว' : 'เพิ่มรายการใหม่แล้ว');
+    loadPracticeItemsAdmin();
+  }).catch(onApiError);
+}
+
+function handleDeletePracticeItem() {
+  var itemId = document.getElementById('pi-item-id').value;
+  if (!itemId) return;
+  if (!confirm('ลบรายการ ' + itemId + ' ออกจากคลังหน่วยเสียง?')) return;
+
+  callApi('deletePracticeItem', { token: AppState.token, itemId: itemId }).then(function (res) {
+    if (!res.success) { showToast(res.message); return; }
+    closeModal('modal-edit-practice-item');
+    showToast('ลบรายการแล้ว');
+    loadPracticeItemsAdmin();
+  }).catch(onApiError);
 }
 
 /* ---------------- ส่วนช่วยทั่วไป ---------------- */
@@ -792,7 +917,8 @@ function escapeHtml(str) {
   }
 
   function playExampleAudio() {
-    speakText(PhoneticState.currentItem.exampleWord, document.getElementById('listen-example-btn'));
+    var item = PhoneticState.currentItem;
+    playSound(item.exampleAudioUrl, item.exampleWord, document.getElementById('listen-example-btn'));
   }
 
   function toggleRecording() {
