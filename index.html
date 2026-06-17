@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="th">
 <head>
@@ -62,6 +63,59 @@
           </div>
           <button type="submit" class="btn btn-primary btn-block" id="teacher-login-btn">เข้าสู่ระบบ</button>
         </form>
+
+        <form id="form-student-register" onsubmit="handleStudentRegister(event)" style="display:none">
+          <div class="field">
+            <label for="reg-student-name">ชื่อ-นามสกุล</label>
+            <input type="text" id="reg-student-name" required>
+          </div>
+          <div class="field">
+            <label for="reg-student-class">ห้องเรียน</label>
+            <input type="text" id="reg-student-class" placeholder="เช่น ม.4/3" required>
+          </div>
+          <div class="field">
+            <label for="reg-student-username">ตั้งชื่อผู้ใช้</label>
+            <input type="text" id="reg-student-username" required autocomplete="username">
+            <p class="field-hint">ตัวอักษร/ตัวเลขภาษาอังกฤษ 3-30 ตัว (ใช้ _ หรือ . ได้)</p>
+          </div>
+          <div class="field">
+            <label for="reg-student-password">ตั้งรหัสผ่าน</label>
+            <input type="password" id="reg-student-password" required autocomplete="new-password">
+            <p class="field-hint">อย่างน้อย 6 ตัวอักษร</p>
+          </div>
+          <div class="field">
+            <label for="reg-student-password-confirm">ยืนยันรหัสผ่าน</label>
+            <input type="password" id="reg-student-password-confirm" required autocomplete="new-password">
+          </div>
+          <button type="submit" class="btn btn-primary btn-block" id="student-register-btn">สร้างบัญชี</button>
+        </form>
+
+        <form id="form-teacher-register" onsubmit="handleTeacherRegister(event)" style="display:none">
+          <div class="field">
+            <label for="reg-teacher-name">ชื่อ-นามสกุล</label>
+            <input type="text" id="reg-teacher-name" required>
+          </div>
+          <div class="field">
+            <label for="reg-teacher-username">ตั้งชื่อผู้ใช้</label>
+            <input type="text" id="reg-teacher-username" required autocomplete="username">
+            <p class="field-hint">ตัวอักษร/ตัวเลขภาษาอังกฤษ 3-30 ตัว (ใช้ _ หรือ . ได้)</p>
+          </div>
+          <div class="field">
+            <label for="reg-teacher-password">ตั้งรหัสผ่าน</label>
+            <input type="password" id="reg-teacher-password" required autocomplete="new-password">
+            <p class="field-hint">อย่างน้อย 6 ตัวอักษร</p>
+          </div>
+          <div class="field">
+            <label for="reg-teacher-password-confirm">ยืนยันรหัสผ่าน</label>
+            <input type="password" id="reg-teacher-password-confirm" required autocomplete="new-password">
+          </div>
+          <button type="submit" class="btn btn-primary btn-block" id="teacher-register-btn">สร้างบัญชี</button>
+        </form>
+
+        <div class="auth-switch">
+          <span id="auth-switch-text">ยังไม่มีบัญชี?</span>
+          <button type="button" class="link-btn" id="auth-switch-btn" onclick="toggleAuthMode()">สร้างบัญชีใหม่</button>
+        </div>
       </div>
     </div>
   </div>
