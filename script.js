@@ -1013,59 +1013,30 @@ function startAzurePronunciation() {
   }
 
   const targetText = item.exampleWord || item.pinyin;
-
-  if (!window.SpeechSDK) {
-    showToast("ยังโหลด Azure Speech SDK ไม่สำเร็จ");
-    return;
-  }
-
   const panel = document.getElementById("azure-score-panel");
+
   panel.style.display = "block";
-  panel.innerHTML = "🎤 กำลังฟังเสียง... กรุณาพูดคำว่า " + targetText;
+  panel.innerHTML = "🎤 กำลังเตรียมประเมินเสียง...";
 
-  const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(
-    speechKey,
-    speechRegion
-  );
-
-  speechConfig.speechRecognitionLanguage = "zh-CN";
-
-  const audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
-
-  const pronunciationConfig =
-    new SpeechSDK.PronunciationAssessmentConfig(
-      targetText,
-      SpeechSDK.PronunciationAssessmentGradingSystem.HundredMark,
-      SpeechSDK.PronunciationAssessmentGranularity.Phoneme,
-      true
-    );
-
-  const recognizer = new SpeechSDK.SpeechRecognizer(
-    speechConfig,
-    audioConfig
-  );
-
-  pronunciationConfig.applyTo(recognizer);
-
-  recognizer.recognizeOnceAsync(
-    function(result) {
-      const assessment =
-        SpeechSDK.PronunciationAssessmentResult.fromResult(result);
-
-      panel.innerHTML = `
-        <h3>🤖 ผลประเมิน AI</h3>
-        <p>คำที่ฝึก: <b>${targetText}</b></p>
-        <p>คะแนนรวม: <b>${Math.round(assessment.pronunciationScore || 0)}</b></p>
-        <p>ความถูกต้อง: <b>${Math.round(assessment.accuracyScore || 0)}</b></p>
-        <p>ความคล่อง: <b>${Math.round(assessment.fluencyScore || 0)}</b></p>
-        <p>พูดครบถ้วน: <b>${Math.round(assessment.completenessScore || 0)}</b></p>
-      `;
-
-      recognizer.close();
-    },
-    function(err) {
-      panel.innerHTML = "❌ ประเมินเสียงไม่ได้: " + err;
-      recognizer.close();
+  callApi("assessPronunciation", {
+    token: AppState.token,
+    referenceText: targetText,
+    audioBase64: "TEST_AUDIO"
+  }).then(function(res) {
+    if (!res.success) {
+      panel.innerHTML = "❌ " + res.message;
+      return;
     }
-  );
+
+    panel.innerHTML = `
+      <h3>🤖 ผลประเมิน AI</h3>
+      <p>คำที่ฝึก: <b>${res.referenceText}</b></p>
+      <p>คะแนนรวม: <b>${res.pronunciationScore}</b></p>
+      <p>ความถูกต้อง: <b>${res.accuracyScore}</b></p>
+      <p>ความคล่อง: <b>${res.fluencyScore}</b></p>
+      <p>พูดครบถ้วน: <b>${res.completenessScore}</b></p>
+    `;
+  }).catch(function(err) {
+    panel.innerHTML = "❌ เชื่อมต่อไม่ได้: " + err.message;
+  });
 }
