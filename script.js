@@ -1005,7 +1005,17 @@ function escapeHtml(str) {
     stopAnyPlayback();
     closeModal('modal-practice');
   }
-
+function callApiPost(action, payload) {
+  return fetch(API_BASE_URL, {
+    method: "POST",
+    body: JSON.stringify({
+      action: action,
+      payload: payload || {}
+    })
+  }).then(function(res) {
+    return res.json();
+  });
+}
 
 async function startAzurePronunciation() {
 
@@ -1050,11 +1060,11 @@ async function startAzurePronunciation() {
         const base64 =
           reader.result.split(",")[1];
 
-        callApi("assessPronunciation", {
-          token: AppState.token,
-          referenceText: targetText,
-          audioBase64: base64
-        })
+     callApiPost("assessPronunciation", {
+  token: AppState.token,
+  referenceText: targetText,
+  audioBase64: base64
+})
         .then(function(res) {
 
           if (!res.success) {
