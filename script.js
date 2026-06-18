@@ -1004,7 +1004,9 @@ function escapeHtml(str) {
     closeModal('modal-practice');
   }
 
-function startAzurePronunciation() {
+
+async function startAzurePronunciation() {
+
   const item = PhoneticState.currentItem;
 
   if (!item) {
@@ -1013,30 +1015,81 @@ function startAzurePronunciation() {
   }
 
   const targetText = item.exampleWord || item.pinyin;
+
   const panel = document.getElementById("azure-score-panel");
-
   panel.style.display = "block";
-  panel.innerHTML = "🎤 กำลังเตรียมประเมินเสียง...";
+  panel.innerHTML = "🎤 กำลังขอสิทธิ์ไมโครโฟน...";
 
-  callApi("assessPronunciation", {
-    token: AppState.token,
-    referenceText: targetText,
-    audioBase64: "TEST_AUDIO"
-  }).then(function(res) {
-    if (!res.success) {
-      panel.innerHTML = "❌ " + res.message;
-      return;
-    }
+  try {
 
-    panel.innerHTML = `
-      <h3>🤖 ผลประเมิน AI</h3>
-      <p>คำที่ฝึก: <b>${res.referenceText}</b></p>
-      <p>คะแนนรวม: <b>${res.pronunciationScore}</b></p>
-      <p>ความถูกต้อง: <b>${res.accuracyScore}</b></p>
-      <p>ความคล่อง: <b>${res.fluencyScore}</b></p>
-      <p>พูดครบถ้วน: <b>${res.completenessScore}</b></p>
-    `;
-  }).catch(function(err) {
-    panel.innerHTML = "❌ เชื่อมต่อไม่ได้: " + err.message;
-  });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: true
+    });
+
+    const recorder = new MediaRecorder(stream);
+    const chunks = [];
+
+    recorder.ondataavailable = e => {
+      chunks.push(e.data);
+    };
+
+    recorder.onstop = async () => {
+
+      panel.innerHTML = "⏳ กำลังส่งเสียงไปประเมิน...";
+
+      const blob = new Blob(chunks, {
+        type: "audio/webm"
+      });
+
+      const reader = new FileReader();
+
+      reader.onloadend = function() {
+
+        const base64 =
+          reader.result.split(",")[1];
+
+        callApi("assessPronunciation", {
+          token: AppState.token,
+          referenceText: targetText,
+          audioBase64: base64
+        })
+        .then(function(res) {
+
+          if (!res.success) {
+            panel.innerHTML =
+              "❌ " + res.message;
+            return;
+          }
+
+          panel.innerHTML = `
+            <h3>🤖 ผลประเมิน AI</h3>
+            <p>คำที่ฝึก: <b>${res.referenceText}</b></p>
+            <p>คะแนนรวม: <b>${res.pronunciationScore}</b></p>
+            <p>ความถูกต้อง: <b>${res.accuracyScore}</b></p>
+            <p>ความคล่อง: <b>${res.fluencyScore}</b></p>
+            <p>พูดครบถ้วน: <b>${res.completenessScore}</b></p>
+          `;
+        });
+      };
+
+      reader.readAsDataURL(blob);
+
+      stream.getTracks().forEach(t => t.stop());
+    };
+
+    recorder.start();
+
+    panel.innerHTML =
+      "🎙️ กำลังบันทึกเสียง 4 วินาที...";
+
+    setTimeout(() => {
+      recorder.stop();
+    }, 4000);
+
+  } catch(err) {
+
+    panel.innerHTML =
+      "❌ ไม่สามารถใช้ไมโครโฟนได้<br>" +
+      err.message;
+  }
 }
