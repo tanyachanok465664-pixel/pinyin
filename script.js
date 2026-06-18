@@ -80,30 +80,41 @@ function callApi(action, payload) {
  * คืนค่าเป็น Promise ที่ resolve เป็น JSON เสมอ (รูปแบบเดียวกับ callApi())
  * reject เฉพาะปัญหาระดับเครือข่าย/หมดเวลา/HTTP error เท่านั้น
  */
-function callApiPost(action, payload, timeoutMs) {
-  var controller = new AbortController();
-  var timer = setTimeout(function () { controller.abort(); }, timeoutMs || 30000);
+function callApi(action, payload) {
+  return new Promise(function (resolve, reject) {
+    var callbackName = '_aiplCallback' + (_jsonpCounter++);
+    var script = document.createElement('script');
 
-  return fetch(API_BASE_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action: action, payload: payload || {} }),
-    signal: controller.signal
-  })
-    .then(function (res) {
-      clearTimeout(timer);
-      if (!res.ok) throw new Error('เซิร์ฟเวอร์ตอบกลับผิดพลาด (HTTP ' + res.status + ')');
-      return res.json();
-    })
-    .catch(function (err) {
-      clearTimeout(timer);
-      if (err.name === 'AbortError') {
-        throw new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ (หมดเวลารอการตอบกลับ)');
-      }
-      throw new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ: ' + err.message);
-    });
+    function cleanup() {
+      clearTimeout(timeoutId);
+      delete window[callbackName];
+      if (script.parentNode) script.parentNode.removeChild(script);
+    }
+
+    var timeoutId = setTimeout(function () {
+      cleanup();
+      reject(new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ (หมดเวลารอการตอบกลับ)'));
+    }, 15000);
+
+    window[callbackName] = function (result) {
+      cleanup();
+      resolve(result);
+    };
+
+    script.onerror = function () {
+      cleanup();
+      reject(new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ'));
+    };
+
+    var url = API_BASE_URL +
+      '?action=' + encodeURIComponent(action) +
+      '&payload=' + encodeURIComponent(JSON.stringify(payload || {})) +
+      '&callback=' + callbackName;
+
+    script.src = url;
+    document.head.appendChild(script);
+  });
 }
-
 var AppState = { token: null, user: null };
 
 var MODULES = [
