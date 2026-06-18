@@ -80,41 +80,30 @@ function callApi(action, payload) {
  * คืนค่าเป็น Promise ที่ resolve เป็น JSON เสมอ (รูปแบบเดียวกับ callApi())
  * reject เฉพาะปัญหาระดับเครือข่าย/หมดเวลา/HTTP error เท่านั้น
  */
-function callApi(action, payload) {
-  return new Promise(function (resolve, reject) {
-    var callbackName = '_aiplCallback' + (_jsonpCounter++);
-    var script = document.createElement('script');
+function callApiPost(action, payload, timeoutMs) {
+  var controller = new AbortController();
+  var timer = setTimeout(function () { controller.abort(); }, timeoutMs || 30000);
 
-    function cleanup() {
-      clearTimeout(timeoutId);
-      delete window[callbackName];
-      if (script.parentNode) script.parentNode.removeChild(script);
-    }
-
-    var timeoutId = setTimeout(function () {
-      cleanup();
-      reject(new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ (หมดเวลารอการตอบกลับ)'));
-    }, 15000);
-
-    window[callbackName] = function (result) {
-      cleanup();
-      resolve(result);
-    };
-
-    script.onerror = function () {
-      cleanup();
-      reject(new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ'));
-    };
-
-    var url = API_BASE_URL +
-      '?action=' + encodeURIComponent(action) +
-      '&payload=' + encodeURIComponent(JSON.stringify(payload || {})) +
-      '&callback=' + callbackName;
-
-    script.src = url;
-    document.head.appendChild(script);
-  });
+  return fetch(API_BASE_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ action: action, payload: payload || {} }),
+    signal: controller.signal
+  })
+    .then(function (res) {
+      clearTimeout(timer);
+      if (!res.ok) throw new Error('เซิร์ฟเวอร์ตอบกลับผิดพลาด (HTTP ' + res.status + ')');
+      return res.json();
+    })
+    .catch(function (err) {
+      clearTimeout(timer);
+      if (err.name === 'AbortError') {
+        throw new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ (หมดเวลารอการตอบกลับ)');
+      }
+      throw new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ: ' + err.message);
+    });
 }
+
 var AppState = { token: null, user: null };
 
 var MODULES = [
@@ -1102,41 +1091,34 @@ function startAzurePronunciation() {
       reader.onloadend = function () {
         var base64 = reader.result.split(',')[1];
 
-       function startAzurePronunciation() {
-  const item = PhoneticState.currentItem;
+        callApiPost('assessPronunciation', {
+          token: AppState.token,
+          referenceText: targetText,
+          audioBase64: base64
+        }).then(function (res) {
+          if (!res.success) {
+            panel.innerHTML = '❌ ' + escapeHtml(res.message || 'ประเมินผลไม่สำเร็จ');
+            return;
+          }
+          panel.innerHTML =
+            '<h3>🤖 ผลประเมิน AI</h3>' +
+            '<p>คำที่ฝึก: <b>' + escapeHtml(res.referenceText || targetText) + '</b></p>' +
+            '<p>คะแนนรวม: <b>' + res.pronunciationScore + '</b></p>' +
+            '<p>ความถูกต้อง: <b>' + res.accuracyScore + '</b></p>' +
+            '<p>ความคล่อง: <b>' + res.fluencyScore + '</b></p>' +
+            '<p>พูดครบถ้วน: <b>' + res.completenessScore + '</b></p>';
+        }).catch(function (err) {
+          panel.innerHTML = '❌ ' + escapeHtml(err.message);
+        });
+      };
 
-  if (!item) {
-    showToast("ไม่พบคำที่ต้องฝึก");
-    return;
-  }
+      reader.readAsDataURL(blob);
+    };
 
-  const targetText = item.exampleWord || item.pinyin;
-  const panel = document.getElementById("azure-score-panel");
-
-  panel.style.display = "block";
-  panel.innerHTML = "🎤 ระบบกลับมาใช้งานได้แล้ว กำลังทดสอบการเชื่อมต่อ...";
-
-  callApi("assessPronunciation", {
-    token: AppState.token,
-    referenceText: targetText,
-    audioBase64: "TEST_AUDIO"
-  })
-  .then(function(res) {
-    if (!res.success) {
-      panel.innerHTML = "❌ " + res.message;
-      return;
-    }
-
-    panel.innerHTML = `
-      <h3>🤖 ผลประเมิน AI</h3>
-      <p>คำที่ฝึก: <b>${res.referenceText}</b></p>
-      <p>คะแนนรวม: <b>${res.pronunciationScore}</b></p>
-      <p>ความถูกต้อง: <b>${res.accuracyScore}</b></p>
-      <p>ความคล่อง: <b>${res.fluencyScore}</b></p>
-      <p>พูดครบถ้วน: <b>${res.completenessScore}</b></p>
-    `;
-  })
-  .catch(function(err) {
-    panel.innerHTML = "❌ เชื่อมต่อไม่ได้: " + err.message;
+    recorder.start();
+    panel.innerHTML = '🎙️ กำลังบันทึกเสียง 4 วินาที...';
+    setTimeout(function () { recorder.stop(); }, 4000);
+  }).catch(function (err) {
+    panel.innerHTML = '❌ ไม่สามารถใช้ไมโครโฟนได้<br>' + escapeHtml(err.message);
   });
 }
