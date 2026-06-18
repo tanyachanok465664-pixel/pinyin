@@ -1016,6 +1016,17 @@ function callApiPost(action, payload) {
     return res.json();
   });
 }
+function callApiPost(action, payload) {
+  return fetch(API_BASE_URL, {
+    method: "POST",
+    body: JSON.stringify({
+      action: action,
+      payload: payload || {}
+    })
+  }).then(function(res) {
+    return res.json();
+  });
+}
 
 async function startAzurePronunciation() {
 
