@@ -1001,8 +1001,25 @@ function escapeHtml(str) {
     stopAnyPlayback();
     closeModal('modal-practice');
   }
-function startAzureTest() {
-  const targetText = "你好";
+
+function startAzurePronunciation() {
+  const item = PhoneticState.currentItem;
+
+  if (!item) {
+    showToast("ไม่พบคำที่ต้องฝึก");
+    return;
+  }
+
+  const targetText = item.exampleWord || item.pinyin;
+
+  if (!window.SpeechSDK) {
+    showToast("ยังโหลด Azure Speech SDK ไม่สำเร็จ");
+    return;
+  }
+
+  const panel = document.getElementById("azure-score-panel");
+  panel.style.display = "block";
+  panel.innerHTML = "🎤 กำลังฟังเสียง... กรุณาพูดคำว่า " + targetText;
 
   const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(
     speechKey,
@@ -1028,21 +1045,25 @@ function startAzureTest() {
 
   pronunciationConfig.applyTo(recognizer);
 
-  document.getElementById("result").innerHTML = "กำลังฟังเสียง...";
+  recognizer.recognizeOnceAsync(
+    function(result) {
+      const assessment =
+        SpeechSDK.PronunciationAssessmentResult.fromResult(result);
 
-  recognizer.recognizeOnceAsync(function(result) {
-    const assessment =
-      SpeechSDK.PronunciationAssessmentResult.fromResult(result);
+      panel.innerHTML = `
+        <h3>🤖 ผลประเมิน AI</h3>
+        <p>คำที่ฝึก: <b>${targetText}</b></p>
+        <p>คะแนนรวม: <b>${Math.round(assessment.pronunciationScore || 0)}</b></p>
+        <p>ความถูกต้อง: <b>${Math.round(assessment.accuracyScore || 0)}</b></p>
+        <p>ความคล่อง: <b>${Math.round(assessment.fluencyScore || 0)}</b></p>
+        <p>พูดครบถ้วน: <b>${Math.round(assessment.completenessScore || 0)}</b></p>
+      `;
 
-    document.getElementById("result").innerHTML = `
-      <h3>ผลการประเมิน</h3>
-      <p>คำที่ฝึก: ${targetText}</p>
-      <p>คะแนนรวม: ${assessment.pronunciationScore}</p>
-      <p>ความถูกต้อง: ${assessment.accuracyScore}</p>
-      <p>ความคล่อง: ${assessment.fluencyScore}</p>
-      <p>พูดครบถ้วน: ${assessment.completenessScore}</p>
-    `;
-
-    recognizer.close();
-  });
+      recognizer.close();
+    },
+    function(err) {
+      panel.innerHTML = "❌ ประเมินเสียงไม่ได้: " + err;
+      recognizer.close();
+    }
+  );
 }
