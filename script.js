@@ -30,9 +30,36 @@ function callApi(action, payload) {
   return new Promise(function (resolve, reject) {
     var callbackName = '_aiplCallback' + (_jsonpCounter++);
     var script = document.createElement('script');
-.catch(function(err) {
-  panel.innerHTML = "❌ ส่งเสียงไป Apps Script ไม่สำเร็จ: " + err.message;
-});
+
+    function cleanup() {
+      clearTimeout(timeoutId);
+      delete window[callbackName];
+      if (script.parentNode) script.parentNode.removeChild(script);
+    }
+
+    var timeoutId = setTimeout(function () {
+      cleanup();
+      reject(new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ (หมดเวลารอการตอบกลับ)'));
+    }, 15000);
+
+    window[callbackName] = function (result) {
+      cleanup();
+      resolve(result);
+    };
+
+    script.onerror = function () {
+      cleanup();
+      reject(new Error('เชื่อมต่อเซิร์ฟเวอร์ไม่สำเร็จ'));
+    };
+
+    var url = API_BASE_URL + '?action=' + encodeURIComponent(action) +
+      '&payload=' + encodeURIComponent(JSON.stringify(payload || {})) +
+      '&callback=' + callbackName;
+
+    script.src = url;
+    document.head.appendChild(script);
+  });
+}
     function cleanup() {
       clearTimeout(timeoutId);
       delete window[callbackName];
@@ -1071,11 +1098,6 @@ async function startAzurePronunciation() {
         const base64 =
           reader.result.split(",")[1];
 
-     callApiPost("assessPronunciation", {
-  token: AppState.token,
-  referenceText: targetText,
-  audioBase64: base64
-})
         .then(function(res) {
 
           if (!res.success) {
@@ -1116,25 +1138,40 @@ async function startAzurePronunciation() {
       err.message;
   }
 }
-function assessPronunciation(token, referenceText, audioBase64) {
-  var session = validateSession(token);
-  if (!session.success) return session;
 
-  if (!referenceText) {
-    return { success: false, message: 'ไม่พบคำต้นแบบ' };
+function startAzurePronunciation() {
+  const item = PhoneticState.currentItem;
+
+  if (!item) {
+    showToast("ไม่พบคำที่ต้องฝึก");
+    return;
   }
 
-  if (!audioBase64) {
-    return { success: false, message: 'ไม่พบไฟล์เสียง' };
-  }
+  const targetText = item.exampleWord || item.pinyin;
+  const panel = document.getElementById("azure-score-panel");
 
-  return {
-    success: true,
-    message: 'รับเสียงสำเร็จแล้ว',
-    referenceText: referenceText,
-    pronunciationScore: 0,
-    accuracyScore: 0,
-    fluencyScore: 0,
-    completenessScore: 0
-  };
+  panel.style.display = "block";
+  panel.innerHTML = "🎤 ระบบกลับมาใช้งานได้แล้ว กำลังทดสอบการเชื่อมต่อ...";
+
+  callApi("assessPronunciation", {
+    token: AppState.token,
+    referenceText: targetText,
+    audioBase64: "TEST_AUDIO"
+  }).then(function(res) {
+    if (!res.success) {
+      panel.innerHTML = "❌ " + res.message;
+      return;
+    }
+
+    panel.innerHTML = `
+      <h3>🤖 ผลประเมิน AI</h3>
+      <p>คำที่ฝึก: <b>${res.referenceText}</b></p>
+      <p>คะแนนรวม: <b>${res.pronunciationScore}</b></p>
+      <p>ความถูกต้อง: <b>${res.accuracyScore}</b></p>
+      <p>ความคล่อง: <b>${res.fluencyScore}</b></p>
+      <p>พูดครบถ้วน: <b>${res.completenessScore}</b></p>
+    `;
+  }).catch(function(err) {
+    panel.innerHTML = "❌ เชื่อมต่อไม่ได้: " + err.message;
+  });
 }
