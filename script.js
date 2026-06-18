@@ -1093,3 +1093,25 @@ async function startAzurePronunciation() {
       err.message;
   }
 }
+function assessPronunciation(token, referenceText, audioBase64) {
+  var session = validateSession(token);
+  if (!session.success) return session;
+
+  if (!referenceText) {
+    return { success: false, message: 'ไม่พบคำต้นแบบ' };
+  }
+
+  if (!audioBase64) {
+    return { success: false, message: 'ไม่พบไฟล์เสียง' };
+  }
+
+  return {
+    success: true,
+    message: 'รับเสียงสำเร็จแล้ว',
+    referenceText: referenceText,
+    pronunciationScore: 0,
+    accuracyScore: 0,
+    fluencyScore: 0,
+    completenessScore: 0
+  };
+}
