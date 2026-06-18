@@ -1001,3 +1001,48 @@ function escapeHtml(str) {
     stopAnyPlayback();
     closeModal('modal-practice');
   }
+function startAzureTest() {
+  const targetText = "你好";
+
+  const speechConfig = SpeechSDK.SpeechConfig.fromSubscription(
+    speechKey,
+    speechRegion
+  );
+
+  speechConfig.speechRecognitionLanguage = "zh-CN";
+
+  const audioConfig = SpeechSDK.AudioConfig.fromDefaultMicrophoneInput();
+
+  const pronunciationConfig =
+    new SpeechSDK.PronunciationAssessmentConfig(
+      targetText,
+      SpeechSDK.PronunciationAssessmentGradingSystem.HundredMark,
+      SpeechSDK.PronunciationAssessmentGranularity.Phoneme,
+      true
+    );
+
+  const recognizer = new SpeechSDK.SpeechRecognizer(
+    speechConfig,
+    audioConfig
+  );
+
+  pronunciationConfig.applyTo(recognizer);
+
+  document.getElementById("result").innerHTML = "กำลังฟังเสียง...";
+
+  recognizer.recognizeOnceAsync(function(result) {
+    const assessment =
+      SpeechSDK.PronunciationAssessmentResult.fromResult(result);
+
+    document.getElementById("result").innerHTML = `
+      <h3>ผลการประเมิน</h3>
+      <p>คำที่ฝึก: ${targetText}</p>
+      <p>คะแนนรวม: ${assessment.pronunciationScore}</p>
+      <p>ความถูกต้อง: ${assessment.accuracyScore}</p>
+      <p>ความคล่อง: ${assessment.fluencyScore}</p>
+      <p>พูดครบถ้วน: ${assessment.completenessScore}</p>
+    `;
+
+    recognizer.close();
+  });
+}
