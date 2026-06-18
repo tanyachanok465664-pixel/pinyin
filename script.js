@@ -1,5 +1,5 @@
-const speechKey = "ใส่ KEY 1 ของครู";
-const speechRegion = "southeastasia";/**
+const speechKey = "";
+const speechRegion = "southeastasia";
  * AI PINYIN LAB — script.js
  * ฟรอนต์เอนด์แบบ static host บน GitHub Pages
  * Apps Script ทำหน้าที่เป็น JSON API เท่านั้น (ไม่มีการเสิร์ฟ HTML จากฝั่งเซิร์ฟเวอร์อีกต่อไป)
