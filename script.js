@@ -30,7 +30,9 @@ function callApi(action, payload) {
   return new Promise(function (resolve, reject) {
     var callbackName = '_aiplCallback' + (_jsonpCounter++);
     var script = document.createElement('script');
-
+.catch(function(err) {
+  panel.innerHTML = "❌ ส่งเสียงไป Apps Script ไม่สำเร็จ: " + err.message;
+});
     function cleanup() {
       clearTimeout(timeoutId);
       delete window[callbackName];
@@ -1084,7 +1086,7 @@ async function startAzurePronunciation() {
 
     setTimeout(() => {
       recorder.stop();
-    }, 4000);
+    }, 1500);
 
   } catch(err) {
 
