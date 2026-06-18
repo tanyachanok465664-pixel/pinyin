@@ -1091,33 +1091,39 @@ function startAzurePronunciation() {
       reader.onloadend = function () {
         var base64 = reader.result.split(',')[1];
 
-        callApiPost('assessPronunciation', {
-          token: AppState.token,
-          referenceText: targetText,
-          audioBase64: base64
-        }).then(function (res) {
-          if (!res.success) {
-            panel.innerHTML = '❌ ' + escapeHtml(res.message || 'ประเมินผลไม่สำเร็จ');
-            return;
-          }
-          panel.innerHTML =
-            '<h3>🤖 ผลประเมิน AI</h3>' +
-            '<p>คำที่ฝึก: <b>' + escapeHtml(res.referenceText || targetText) + '</b></p>' +
-            '<p>คะแนนรวม: <b>' + res.pronunciationScore + '</b></p>' +
-            '<p>ความถูกต้อง: <b>' + res.accuracyScore + '</b></p>' +
-            '<p>ความคล่อง: <b>' + res.fluencyScore + '</b></p>' +
-            '<p>พูดครบถ้วน: <b>' + res.completenessScore + '</b></p>';
-        }).catch(function (err) {
-          panel.innerHTML = '❌ ' + escapeHtml(err.message);
-        });
-      };
+       function startAzurePronunciation() {
+  const item = PhoneticState.currentItem;
 
-      reader.readAsDataURL(blob);
-    };
+  if (!item) {
+    showToast("ไม่พบคำที่ต้องฝึก");
+    return;
+  }
 
-    recorder.start();
-    panel.innerHTML = '🎙️ กำลังบันทึกเสียง 4 วินาที...';
-    setTimeout(function () { recorder.stop(); }, 4000);
+  const targetText = item.exampleWord || item.pinyin;
+  const panel = document.getElementById("azure-score-panel");
+
+  panel.style.display = "block";
+  panel.innerHTML = "🎤 ระบบกลับมาใช้งานได้แล้ว กำลังทดสอบการเชื่อมต่อ...";
+
+  callApi("assessPronunciation", {
+    token: AppState.token,
+    referenceText: targetText,
+    audioBase64: "TEST_AUDIO"
+  })
+  .then(function(res) {
+    if (!res.success) {
+      panel.innerHTML = "❌ " + res.message;
+      return;
+    }
+
+    panel.innerHTML = `
+      <h3>🤖 ผลประเมิน AI</h3>
+      <p>คำที่ฝึก: <b>${res.referenceText}</b></p>
+      <p>คะแนนรวม: <b>${res.pronunciationScore}</b></p>
+      <p>ความถูกต้อง: <b>${res.accuracyScore}</b></p>
+      <p>ความคล่อง: <b>${res.fluencyScore}</b></p>
+      <p>พูดครบถ้วน: <b>${res.completenessScore}</b></p>
+    `;
   })
   .catch(function(err) {
     panel.innerHTML = "❌ เชื่อมต่อไม่ได้: " + err.message;
