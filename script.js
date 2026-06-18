@@ -1118,7 +1118,8 @@ function startAzurePronunciation() {
     recorder.start();
     panel.innerHTML = '🎙️ กำลังบันทึกเสียง 4 วินาที...';
     setTimeout(function () { recorder.stop(); }, 4000);
-  }).catch(function (err) {
-    panel.innerHTML = '❌ ไม่สามารถใช้ไมโครโฟนได้<br>' + escapeHtml(err.message);
+  })
+  .catch(function(err) {
+    panel.innerHTML = "❌ เชื่อมต่อไม่ได้: " + err.message;
   });
 }
