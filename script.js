@@ -1138,6 +1138,80 @@ function arrayBufferToBase64(buffer) {
  * แล้วส่งไป Apps Script (assessPronunciation) ผ่าน callApiPost()
  * ไม่มี Azure key ใน frontend เลย — key อยู่ใน Script Properties ฝั่ง backend เท่านั้น
  */
+/**
+ * แปลง AudioBuffer → WAV PCM (16-bit, mono) แล้วคืนเป็น ArrayBuffer
+ * ต้อง resample ให้เป็น 16000 Hz ก่อนเพราะ Azure Pronunciation Assessment
+ * ต้องการ 16kHz mono เท่านั้น
+ */
+function audioBufferToWav(audioBuffer) {
+  var TARGET_SAMPLE_RATE = 16000;
+  var numChannels = 1; // mono เสมอ
+
+  return new Promise(function (resolve) {
+    // Resample ด้วย OfflineAudioContext
+    var offlineCtx = new OfflineAudioContext(
+      numChannels,
+      Math.ceil(audioBuffer.duration * TARGET_SAMPLE_RATE),
+      TARGET_SAMPLE_RATE
+    );
+    var source = offlineCtx.createBufferSource();
+    source.buffer = audioBuffer;
+    source.connect(offlineCtx.destination);
+    source.start(0);
+
+    offlineCtx.startRendering().then(function (rendered) {
+      var samples = rendered.getChannelData(0); // Float32Array
+      var dataLen = samples.length * 2;         // 16-bit = 2 bytes/sample
+      var buffer  = new ArrayBuffer(44 + dataLen);
+      var view    = new DataView(buffer);
+
+      function writeStr(offset, str) {
+        for (var i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+      }
+
+      // WAV header (44 bytes)
+      writeStr(0,  'RIFF');
+      view.setUint32(4,  36 + dataLen, true);
+      writeStr(8,  'WAVE');
+      writeStr(12, 'fmt ');
+      view.setUint32(16, 16, true);                       // PCM chunk size
+      view.setUint16(20, 1, true);                        // PCM format
+      view.setUint16(22, numChannels, true);
+      view.setUint32(24, TARGET_SAMPLE_RATE, true);
+      view.setUint32(28, TARGET_SAMPLE_RATE * 2, true);   // byte rate
+      view.setUint16(32, 2, true);                        // block align
+      view.setUint16(34, 16, true);                       // bits per sample
+      writeStr(36, 'data');
+      view.setUint32(40, dataLen, true);
+
+      // PCM samples: Float32 → Int16
+      var offset = 44;
+      for (var i = 0; i < samples.length; i++) {
+        var s = Math.max(-1, Math.min(1, samples[i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        offset += 2;
+      }
+
+      resolve(buffer);
+    });
+  });
+}
+
+/**
+ * แปลง ArrayBuffer → base64 string
+ */
+function arrayBufferToBase64(buffer) {
+  var bytes  = new Uint8Array(buffer);
+  var binary = '';
+  for (var i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+/**
+ * startAzurePronunciation — บันทึกเสียง 4 วินาที แปลงเป็น WAV PCM 16kHz
+ * แล้วส่งไป Apps Script (assessPronunciation) ผ่าน callApiPost()
+ * ไม่มี Azure key ใน frontend เลย — key อยู่ใน Script Properties ฝั่ง backend เท่านั้น
+ */
 function startAzurePronunciation() {
   var item = PhoneticState.currentItem;
   if (!item) { showToast('ไม่พบคำที่ต้องฝึก'); return; }
@@ -1175,7 +1249,16 @@ function startAzurePronunciation() {
             .then(function (wavBuffer) {
               audioCtx.close();
               var base64 = arrayBufferToBase64(wavBuffer);
-              panel.innerHTML = '⏳ กำลังส่งเสียงไปประเมิน...';
+
+              // DEBUG ชั่วคราว: สร้างลิงก์ฟังเสียง WAV ที่กำลังจะส่งไป Azure จริง ๆ
+              // เพื่อตรวจว่าไฟล์แปลงสำเร็จและมีเสียงพูดอยู่จริง ไม่ใช่เสียงเงียบ/แตก
+              // (ลบ <audio> debug นี้ทิ้งได้เมื่อมั่นใจแล้วว่าการแปลงเสียงทำงานถูกต้อง)
+              var wavBlobUrl = URL.createObjectURL(new Blob([wavBuffer], { type: 'audio/wav' }));
+              console.log('Debug: ฟังเสียง WAV ที่จะส่งไป Azure ได้ที่:', wavBlobUrl);
+
+              panel.innerHTML = '⏳ กำลังส่งเสียงไปประเมิน...' +
+                '<br><audio controls src="' + wavBlobUrl + '" style="margin-top:8px;width:100%"></audio>' +
+                '<p style="font-size:12px;color:#888">(เสียงทดสอบ - ลองฟังว่าชัดเจนไหมก่อนรอผล)</p>';
 
               return callApiPost('assessPronunciation', {
                 token:         AppState.token,
@@ -1188,6 +1271,11 @@ function startAzurePronunciation() {
                 panel.innerHTML = '❌ ' + escapeHtml(res.message || 'ประเมินผลไม่สำเร็จ');
                 return;
               }
+              var fluencyDisplay     = (res.fluencyScore !== null && res.fluencyScore !== undefined) ? res.fluencyScore : 'ไม่มีข้อมูล';
+              var completenessDisplay = (res.completenessScore !== null && res.completenessScore !== undefined) ? res.completenessScore : 'ไม่มีข้อมูล';
+              var fluencyNote = (res.fluencyScore === null) ?
+                '<p class="score-note">หมายเหตุ: คำเดี่ยวสั้นเกินไปที่ Azure จะวัดความคล่อง/ความครบถ้วนได้ จึงแสดงเฉพาะคะแนนความถูกต้อง</p>' : '';
+
               panel.innerHTML =
                 '<div class="azure-result">' +
                   '<h3>🤖 ผลประเมินการออกเสียง</h3>' +
@@ -1196,9 +1284,10 @@ function startAzurePronunciation() {
                   '<div class="score-grid">' +
                     '<div class="score-item"><span class="score-val">' + res.pronunciationScore + '</span><span class="score-lbl">คะแนนรวม</span></div>' +
                     '<div class="score-item"><span class="score-val">' + res.accuracyScore     + '</span><span class="score-lbl">ความถูกต้อง</span></div>' +
-                    '<div class="score-item"><span class="score-val">' + res.fluencyScore      + '</span><span class="score-lbl">ความคล่อง</span></div>' +
-                    '<div class="score-item"><span class="score-val">' + res.completenessScore + '</span><span class="score-lbl">ความครบถ้วน</span></div>' +
+                    '<div class="score-item"><span class="score-val">' + fluencyDisplay        + '</span><span class="score-lbl">ความคล่อง</span></div>' +
+                    '<div class="score-item"><span class="score-val">' + completenessDisplay   + '</span><span class="score-lbl">ความครบถ้วน</span></div>' +
                   '</div>' +
+                  fluencyNote +
                 '</div>';
             })
             .catch(function (err) {
