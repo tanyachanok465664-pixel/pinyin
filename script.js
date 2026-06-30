@@ -1005,7 +1005,8 @@ function startRecording() {
     PhoneticState.mediaRecorder = new MediaRecorder(stream);
     PhoneticState.mediaRecorder.ondataavailable = function (e) { if (e.data.size > 0) PhoneticState.audioChunks.push(e.data); };
     PhoneticState.mediaRecorder.onstop = function () {
-      var blob = new Blob(PhoneticState.audioChunks, { type: 'audio/webm' });
+      var recMime = PhoneticState.mediaRecorder.mimeType || 'audio/mp4';
+      var blob = new Blob(PhoneticState.audioChunks, { type: recMime });
       PhoneticState.recordedBlobUrl = URL.createObjectURL(blob);
       document.getElementById('playback-panel').classList.add('show');
 
@@ -1073,6 +1074,7 @@ var AzureRecordState = {
   webmBlobUrl: null,
   wavBuffer:   null,
   wavBlobUrl:  null,
+  mimeType:    '',   // format จริงที่ MediaRecorder ใช้ตามที่ browser/device รองรับ
   maxMs:       15000
 };
 
@@ -1096,7 +1098,18 @@ function startAzurePronunciation() {
   navigator.mediaDevices.getUserMedia({ audio: true, video: false })
     .then(function (stream) {
       AzureRecordState.stream        = stream;
-      AzureRecordState.mediaRecorder = new MediaRecorder(stream);
+      // ตรวจหา format ที่ browser/device นี้รองรับจริง (iPhone Safari ไม่รองรับ webm)
+      var preferredMime = [
+        'audio/mp4',          // iPhone Safari, Firefox บาง version
+        'audio/webm;codecs=opus', // Chrome, Edge, Android
+        'audio/webm',         // Chrome ทั่วไป
+        'audio/ogg;codecs=opus'   // Firefox
+      ].find(function (m) { return MediaRecorder.isTypeSupported(m); }) || '';
+
+      AzureRecordState.mimeType    = preferredMime;
+      AzureRecordState.mediaRecorder = preferredMime
+        ? new MediaRecorder(stream, { mimeType: preferredMime })
+        : new MediaRecorder(stream);  // ให้ browser เลือก format เองถ้าไม่มีที่รองรับ
       AzureRecordState.mediaRecorder.ondataavailable = function (e) {
         if (e.data.size > 0) AzureRecordState.chunks.push(e.data);
       };
@@ -1129,7 +1142,11 @@ function stopAzureRecording() {
 
 /** ขั้น 1 — ฟังเสียง webm ต้นฉบับที่บันทึกมา */
 function renderWebmReviewStep(panel) {
-  var blob = new Blob(AzureRecordState.chunks, { type: 'audio/webm' });
+  // ใช้ mimeType ที่ MediaRecorder บอกมาจริงๆ ไม่ hardcode เป็น webm
+  var actualMime = AzureRecordState.mediaRecorder.mimeType || AzureRecordState.mimeType || 'audio/webm';
+  AzureRecordState.mimeType = actualMime;
+
+  var blob = new Blob(AzureRecordState.chunks, { type: actualMime });
   AzureRecordState.webmBlobUrl = URL.createObjectURL(blob);
 
   panel.innerHTML =
@@ -1146,7 +1163,7 @@ function convertToWavAndPreview() {
   var panel = document.getElementById('azure-score-panel');
   panel.innerHTML = '🔄 กำลังแปลงเสียงเป็น WAV 16kHz...';
 
-  var blob      = new Blob(AzureRecordState.chunks, { type: 'audio/webm' });
+  var blob      = new Blob(AzureRecordState.chunks, { type: AzureRecordState.mimeType || 'audio/mp4' });
   var reader    = new FileReader();
 
   reader.onloadend = function () {
