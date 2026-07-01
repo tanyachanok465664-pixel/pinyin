@@ -1064,466 +1064,170 @@ function closePracticeModal() {
   closeModal('modal-practice');
 }
 
-
-/* ================================================================
- * RECORDING PIPELINE v3 — Web Audio ScriptProcessor
- *
- * ROOT CAUSE of previous failures:
- *   1. MediaRecorder produces audio/mp4 on iOS — not WAV
- *   2. OfflineAudioContext post-processing silently fails on iOS
- *      because AudioContext created in async callbacks is suspended
- *   3. Resulting WAV was silent → Azure: InitialSilenceTimeout / NoMatch
- *
- * NEW APPROACH:
- *   • ScriptProcessor node intercepts raw Float32 PCM during recording
- *   • Downsamples in real-time from device rate (44100/48000Hz) → 16kHz
- *   • After recording stops, merges chunks and encodes WAV in one pass
- *   • NO OfflineAudioContext needed — no async decode failures
- *   • Works on iOS Safari, Android Chrome, Chrome, Edge, Firefox
- *
- * PIPELINE:
- *   getUserMedia → AudioContext → MediaStreamSource
- *     → ScriptProcessor (downsample + capture) → destination
- *     → [stop] → merge Float32 chunks → encodeWAV → bufferToBase64
- *     → callApiPost('assessPronunciation') → Azure → scores
- * ================================================================ */
-
-/* ----------------------------------------------------------------
- * DSP helpers
- * ---------------------------------------------------------------- */
-
-/**
- * Downsample Float32 mono PCM from inputRate to outputRate.
- * Uses block-averaging (simple low-pass) to reduce aliasing.
- */
-function downsamplePCM(buffer, inputRate, outputRate) {
-  if (inputRate === outputRate) return buffer;
-  var ratio     = inputRate / outputRate;
-  var outLen    = Math.floor(buffer.length / ratio);
-  var out       = new Float32Array(outLen);
-  for (var i = 0; i < outLen; i++) {
-    var start = Math.floor(i * ratio);
-    var end   = Math.min(Math.floor((i + 1) * ratio), buffer.length);
-    var sum   = 0;
-    for (var j = start; j < end; j++) sum += buffer[j];
-    out[i] = end > start ? sum / (end - start) : 0;
-  }
-  return out;
-}
-
-/** Concatenate an array of Float32Arrays into one contiguous buffer */
-function mergeFloat32Chunks(chunks) {
-  var total = 0;
-  for (var i = 0; i < chunks.length; i++) total += chunks[i].length;
-  var out = new Float32Array(total);
-  var off = 0;
-  for (var i = 0; i < chunks.length; i++) {
-    out.set(chunks[i], off);
-    off += chunks[i].length;
-  }
-  return out;
-}
-
-/**
- * Encode Float32 mono PCM → WAV (PCM 16-bit LE, mono, specified sampleRate).
- * Produces a valid RIFF/WAVE file that Azure Speech accepts.
- */
-function encodeWAV(samples, sampleRate) {
-  var dataLen = samples.length * 2;          // 16-bit = 2 bytes/sample
-  var buf     = new ArrayBuffer(44 + dataLen);
-  var v       = new DataView(buf);
-
-  function ws(off, str) {
-    for (var i = 0; i < str.length; i++) v.setUint8(off + i, str.charCodeAt(i));
-  }
-
-  // RIFF chunk
-  ws(0, 'RIFF');
-  v.setUint32(4,  36 + dataLen, true);  // ChunkSize
-  ws(8, 'WAVE');
-
-  // fmt sub-chunk
-  ws(12, 'fmt ');
-  v.setUint32(16, 16,            true); // Subchunk1Size = 16 (PCM)
-  v.setUint16(20, 1,             true); // AudioFormat = 1 (PCM)
-  v.setUint16(22, 1,             true); // NumChannels = 1 (mono)
-  v.setUint32(24, sampleRate,    true); // SampleRate
-  v.setUint32(28, sampleRate*2,  true); // ByteRate = SR * ch * bps/8
-  v.setUint16(32, 2,             true); // BlockAlign = ch * bps/8
-  v.setUint16(34, 16,            true); // BitsPerSample
-
-  // data sub-chunk
-  ws(36, 'data');
-  v.setUint32(40, dataLen,       true); // Subchunk2Size
-
-  // PCM samples: Float32 [-1,1] → Int16 [-32768, 32767]
-  var off = 44;
-  for (var i = 0; i < samples.length; i++) {
-    var s   = Math.max(-1, Math.min(1, samples[i]));
-    var val = s < 0 ? Math.round(s * 32768) : Math.round(s * 32767);
-    v.setInt16(off, val, true);
-    off += 2;
-  }
-  return buf;
-}
-
-/**
- * ArrayBuffer → base64 string.
- * Uses 8 KB chunks to avoid call-stack overflow on large files.
- */
-function bufferToBase64(buf) {
-  var uint8  = new Uint8Array(buf);
-  var CHUNK  = 8192;
-  var result = '';
-  for (var i = 0; i < uint8.length; i += CHUNK) {
-    result += String.fromCharCode.apply(
-      null,
-      uint8.subarray(i, Math.min(i + CHUNK, uint8.length))
-    );
-  }
-  return btoa(result);
-}
-
-/* ----------------------------------------------------------------
- * Recording state
- * ---------------------------------------------------------------- */
+/* ============================================================
+ * บันทึกเสียงและส่งครูตรวจ
+ * flow: กดปุ่ม → บันทึก (กดเริ่ม/กดหยุดเอง) → ฟังเสียงตัวเอง → ส่งครู → ✅
+ * ไม่มี Azure ไม่มีคะแนน ครูฟังและให้คะแนนเองจาก Teacher Dashboard
+ * ============================================================ */
 
 var RecordState = {
-  audioCtx:       null,
-  stream:         null,
-  source:         null,
-  processor:      null,
-  keepAliveOsc:   null,   // iOS: prevents silent-graph stall
-  keepAliveGain:  null,
-  isRecording:    false,
-  pcmChunks:      [],
-  sourceSR:       44100,  // actual AudioContext sample rate (set at runtime)
-  targetSR:       16000,  // Azure requirement
-  wavBuffer:      null,   // ArrayBuffer of final WAV
-  wavBlobUrl:     null,   // Object URL for <audio> playback
-  timerRef:       null,
-  startedAt:      0,
-  maxMs:          20000   // 20-second ceiling
+  chunks:      [],
+  stream:      null,
+  mediaRecorder: null,
+  isRecording: false,
+  blobUrl:     null,
+  mimeType:    '',
+  maxMs:       20000
 };
 
-/* ----------------------------------------------------------------
- * startAzurePronunciation() — entry point (called from HTML button)
- * ---------------------------------------------------------------- */
+/** เรียกจากปุ่ม "ประเมินการออกเสียง" หรือ "ฝึกพูด AI" ใน index.html */
 function startAzurePronunciation() {
   var item = PhoneticState.currentItem;
   if (!item) { showToast('ไม่พบคำที่ต้องฝึก'); return; }
 
   var panel = document.getElementById('azure-score-panel');
-  if (!panel) { showToast('ไม่พบ element id="azure-score-panel" ใน index.html'); return; }
+  if (!panel) { showToast('ไม่พบ element id="azure-score-panel" ใน HTML'); return; }
 
   _cleanupRecordState();
 
   panel.style.display = 'block';
-  panel.innerHTML     = '🎤 กำลังขอสิทธิ์ไมโครโฟน...';
+  panel.innerHTML = '🎤 กำลังขอสิทธิ์ไมโครโฟน...';
 
-  navigator.mediaDevices.getUserMedia({
-    audio: {
-      channelCount:     { ideal: 1 },
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl:  true
-    },
-    video: false
-  })
-  .then(function (stream) {
-    RecordState.stream = stream;
+  navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+    .then(function (stream) {
+      RecordState.stream = stream;
 
-    // ──────────────────────────────────────────────────────
-    // AudioContext MUST be created inside the getUserMedia
-    // .then() callback — this IS triggered by the user's
-    // click gesture on iOS, so the context starts 'running'.
-    // ──────────────────────────────────────────────────────
-    try {
-      RecordState.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    } catch (e) {
-      panel.innerHTML = '❌ ไม่รองรับ AudioContext: ' + escapeHtml(e.message);
-      stream.getTracks().forEach(function (t) { t.stop(); });
-      return;
-    }
+      var preferredMime = [
+        'audio/mp4',
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus'
+      ].find(function (m) { return MediaRecorder.isTypeSupported(m); }) || '';
 
-    RecordState.sourceSR = RecordState.audioCtx.sampleRate;
+      RecordState.mimeType      = preferredMime;
+      RecordState.mediaRecorder = preferredMime
+        ? new MediaRecorder(stream, { mimeType: preferredMime })
+        : new MediaRecorder(stream);
 
-    // Resume if the browser pre-suspended the context
-    var resumeOp = RecordState.audioCtx.state === 'suspended'
-      ? RecordState.audioCtx.resume()
-      : Promise.resolve();
-
-    resumeOp.then(function () {
-      RecordState.source    = RecordState.audioCtx.createMediaStreamSource(stream);
-
-      // bufferSize must be power of 2; 1 input ch, 1 output ch
-      RecordState.processor = RecordState.audioCtx.createScriptProcessor(4096, 1, 1);
-
-      RecordState.processor.onaudioprocess = function (e) {
-        if (!RecordState.isRecording) return;
-        var raw  = e.inputBuffer.getChannelData(0); // Float32Array
-        var down = downsamplePCM(raw, RecordState.sourceSR, RecordState.targetSR);
-        RecordState.pcmChunks.push(new Float32Array(down));
+      RecordState.mediaRecorder.ondataavailable = function (e) {
+        if (e.data.size > 0) RecordState.chunks.push(e.data);
       };
 
-      // source → processor → destination
-      // Connecting to destination is required on iOS Safari to fire onaudioprocess
-      RecordState.source.connect(RecordState.processor);
-      RecordState.processor.connect(RecordState.audioCtx.destination);
+      RecordState.mediaRecorder.onstop = function () {
+        stream.getTracks().forEach(function (t) { t.stop(); });
+        _showReviewPanel(panel, item);
+      };
 
-      // iOS Safari "silent graph" workaround:
-      // A near-inaudible oscillator keeps the audio graph active so
-      // onaudioprocess fires even when the microphone input is quiet.
-      RecordState.keepAliveOsc  = RecordState.audioCtx.createOscillator();
-      RecordState.keepAliveGain = RecordState.audioCtx.createGain();
-      RecordState.keepAliveGain.gain.value = 0.00001; // -100 dB — inaudible
-      RecordState.keepAliveOsc.connect(RecordState.keepAliveGain);
-      RecordState.keepAliveGain.connect(RecordState.audioCtx.destination);
-      RecordState.keepAliveOsc.start();
-
+      RecordState.mediaRecorder.start();
       RecordState.isRecording = true;
-      RecordState.startedAt   = Date.now();
 
       panel.innerHTML =
-        '🎙️ บันทึกเสียงอยู่...<br>' +
-        'พูดคำว่า <span class="hanzi" style="font-size:22px">' +
+        '🎙️ กำลังบันทึก... พูดคำว่า <span class="hanzi" style="font-size:22px">' +
         escapeHtml(item.exampleWord || item.pinyin) + '</span>' +
-        '<br><small style="color:#888;font-size:12px">' +
-          'ต้นทาง: ' + RecordState.sourceSR + ' Hz → ปลายทาง: 16000 Hz' +
-        '</small>' +
-        '<br><br><button class="btn btn-primary" ' +
-          'style="margin-top:8px;width:100%" ' +
+        '<br><br><button class="btn btn-primary" style="width:100%;margin-top:8px" ' +
           'onclick="stopAzureRecording()">⏹ หยุดบันทึก</button>';
 
       RecordState.timerRef = setTimeout(function () {
         if (RecordState.isRecording) stopAzureRecording();
       }, RecordState.maxMs);
+    })
+    .catch(function (err) {
+      panel.innerHTML = '❌ ไม่สามารถใช้ไมโครโฟนได้: ' + escapeHtml(err.message);
     });
-  })
-  .catch(function (err) {
-    panel.innerHTML = '❌ ไม่สามารถใช้ไมโครโฟนได้: ' + escapeHtml(err.message);
-  });
 }
 
-/* ----------------------------------------------------------------
- * stopAzureRecording() — stops capture, encodes WAV synchronously
- * ---------------------------------------------------------------- */
 function stopAzureRecording() {
   if (!RecordState.isRecording) return;
   RecordState.isRecording = false;
   clearTimeout(RecordState.timerRef);
-
-  var durationMs = Date.now() - RecordState.startedAt;
-
-  // Disconnect audio graph
-  try { RecordState.source.disconnect(); }    catch (e) {}
-  try { RecordState.processor.disconnect(); } catch (e) {}
-  try { RecordState.keepAliveOsc.stop(); }    catch (e) {}
-  try { RecordState.audioCtx.close(); }       catch (e) {}
-  if (RecordState.stream) {
-    RecordState.stream.getTracks().forEach(function (t) { t.stop(); });
+  if (RecordState.mediaRecorder && RecordState.mediaRecorder.state !== 'inactive') {
+    RecordState.mediaRecorder.stop();
   }
+}
 
-  var panel = document.getElementById('azure-score-panel');
-  if (!panel) return;
+function _showReviewPanel(panel, item) {
+  var actualMime = (RecordState.mediaRecorder && RecordState.mediaRecorder.mimeType)
+    || RecordState.mimeType || 'audio/mp4';
+  RecordState.mimeType = actualMime;
 
-  if (RecordState.pcmChunks.length === 0) {
-    panel.innerHTML =
-      '❌ ไม่พบข้อมูลเสียง (ScriptProcessor ไม่ได้รับข้อมูล)<br>' +
-      '<small style="color:#888">อาจเกิดจาก: ไมโครโฟนถูกปิดเสียง หรือ AudioContext ถูก block</small><br>' +
-      '<button class="btn btn-ghost" style="margin-top:8px;width:100%" ' +
-        'onclick="startAzurePronunciation()">🔁 ลองใหม่</button>';
-    return;
-  }
-
-  // Merge all PCM chunks and encode to WAV
-  var merged  = mergeFloat32Chunks(RecordState.pcmChunks);
-  var wavBuf  = encodeWAV(merged, RecordState.targetSR);
-  var wavBlob = new Blob([wavBuf], { type: 'audio/wav' });
-
-  if (RecordState.wavBlobUrl) URL.revokeObjectURL(RecordState.wavBlobUrl);
-  RecordState.wavBuffer  = wavBuf;
-  RecordState.wavBlobUrl = URL.createObjectURL(wavBlob);
-
-  var pcmKb  = (merged.length * 4 / 1024).toFixed(1);
-  var wavKb  = (wavBuf.byteLength / 1024).toFixed(1);
-  var durSec = (durationMs / 1000).toFixed(1);
+  var blob = new Blob(RecordState.chunks, { type: actualMime });
+  if (RecordState.blobUrl) URL.revokeObjectURL(RecordState.blobUrl);
+  RecordState.blobUrl = URL.createObjectURL(blob);
 
   panel.innerHTML =
-    '<p>✅ บันทึกเสร็จ — ฟังเสียง WAV ก่อนส่ง<br>' +
-    '<small style="color:#888">Duration: ' + durSec + 's | ' +
-    'PCM samples: ' + merged.length.toLocaleString() + ' | ' +
-    'WAV: ' + wavKb + ' KB</small></p>' +
-    '<audio controls src="' + RecordState.wavBlobUrl + '" ' +
-      'style="width:100%;margin-bottom:10px"></audio>' +
+    '<p>✅ บันทึกเสร็จแล้ว — ฟังเสียงตัวเองก่อนส่งครู:</p>' +
+    '<audio controls src="' + RecordState.blobUrl + '" ' +
+      'style="width:100%;margin-bottom:12px"></audio>' +
     '<div style="display:flex;gap:8px">' +
       '<button class="btn btn-ghost" style="flex:1" ' +
         'onclick="startAzurePronunciation()">🔁 บันทึกใหม่</button>' +
       '<button class="btn btn-primary" style="flex:1" ' +
-        'onclick="sendToAzure()">📤 ส่งประเมินผล</button>' +
+        'onclick="submitRecordingToTeacher()">📤 ส่งครูตรวจ</button>' +
     '</div>';
 }
 
-/* ----------------------------------------------------------------
- * sendToAzure() — converts WAV to base64, calls backend
- * ---------------------------------------------------------------- */
-function sendToAzure() {
-  var item = PhoneticState.currentItem;
-  if (!RecordState.wavBuffer) {
-    showToast('ไม่พบไฟล์เสียง — กรุณาบันทึกใหม่');
-    return;
-  }
-
-  var panel = document.getElementById('azure-score-panel');
-  panel.innerHTML = '🔄 กำลังเตรียมส่ง...';
-
-  var b64    = bufferToBase64(RecordState.wavBuffer);
-  var b64Kb  = (b64.length / 1024).toFixed(0);
-  var wavKb  = (RecordState.wavBuffer.byteLength / 1024).toFixed(0);
-
-  panel.innerHTML =
-    '⏳ กำลังส่งไป Azure...<br>' +
-    '<small style="color:#888">WAV: ' + wavKb + ' KB | base64: ' + b64Kb + ' KB</small>';
-
-  callApiPost('assessPronunciation', {
-    token:         AppState.token,
-    referenceText: item.exampleWord || item.pinyin,
-    audioBase64:   b64
-  })
-  .then(function (res) { renderAzureResult(panel, res); })
-  .catch(function (err) {
-    panel.innerHTML =
-      '❌ ' + escapeHtml(err.message) +
-      '<br><button class="btn btn-ghost" style="margin-top:8px;width:100%" ' +
-        'onclick="startAzurePronunciation()">🔁 ลองใหม่</button>';
-  });
-}
-
-/* ----------------------------------------------------------------
- * submitRecordingToTeacher() — sends WAV to Drive (teacher review)
- * ---------------------------------------------------------------- */
 function submitRecordingToTeacher() {
   var item = PhoneticState.currentItem;
-  if (!RecordState.wavBuffer || !item) {
-    showToast('ไม่พบไฟล์เสียง — กรุณาบันทึกก่อน');
-    return;
-  }
+  if (!item || !RecordState.chunks.length) { showToast('ไม่พบเสียง กรุณาบันทึกก่อน'); return; }
 
   var panel = document.getElementById('azure-score-panel');
-  panel.innerHTML = '⏳ กำลังส่งให้ครู...';
+  panel.innerHTML = '⏳ กำลังส่งเสียงให้ครู...';
 
-  var b64 = bufferToBase64(RecordState.wavBuffer);
+  var blob   = new Blob(RecordState.chunks, { type: RecordState.mimeType || 'audio/mp4' });
+  var reader = new FileReader();
 
-  callApiPost('submitRecording', {
-    token:       AppState.token,
-    itemId:      item.itemId,
-    audioBase64: b64,
-    mimeType:    'audio/wav'
-  })
-  .then(function (res) {
-    if (!res.success) {
+  reader.onloadend = function () {
+    var base64 = reader.result.split(',')[1];
+    callApiPost('submitRecording', {
+      token:       AppState.token,
+      itemId:      item.itemId,
+      audioBase64: base64,
+      mimeType:    RecordState.mimeType || 'audio/mp4'
+    })
+    .then(function (res) {
+      if (!res.success) {
+        panel.innerHTML =
+          '❌ ' + escapeHtml(res.message || 'ส่งไม่สำเร็จ') +
+          '<br><button class="btn btn-ghost" style="margin-top:8px;width:100%" ' +
+            'onclick="startAzurePronunciation()">🔁 ลองใหม่</button>';
+        return;
+      }
       panel.innerHTML =
-        '❌ ' + escapeHtml(res.message) +
-        '<br><button class="btn btn-ghost" style="margin-top:8px" ' +
+        '<div style="text-align:center;padding:12px">' +
+          '<p style="font-size:32px">✅</p>' +
+          '<p><b>ส่งเสียงให้ครูตรวจแล้ว</b></p>' +
+          '<p style="font-size:13px;color:#888">' +
+            'ครูจะฟังและให้คะแนนใน Teacher Dashboard</p>' +
+          '<button class="btn btn-ghost" style="margin-top:12px;width:100%" ' +
+            'onclick="startAzurePronunciation()">🔁 ฝึกอีกครั้ง</button>' +
+        '</div>';
+    })
+    .catch(function (err) {
+      panel.innerHTML =
+        '❌ ' + escapeHtml(err.message) +
+        '<br><button class="btn btn-ghost" style="margin-top:8px;width:100%" ' +
           'onclick="startAzurePronunciation()">🔁 ลองใหม่</button>';
-      return;
-    }
-    panel.innerHTML =
-      '<div style="text-align:center;padding:8px">' +
-        '<p style="font-size:28px">✅</p>' +
-        '<p><b>ส่งเสียงให้ครูตรวจแล้ว</b></p>' +
-        '<p style="font-size:13px;color:#888">ครูจะฟังและให้คะแนนจาก Teacher Dashboard</p>' +
-        '<button class="btn btn-ghost" style="margin-top:10px;width:100%" ' +
-          'onclick="startAzurePronunciation()">🔁 ฝึกอีกครั้ง</button>' +
-      '</div>';
-  })
-  .catch(function (err) {
-    panel.innerHTML =
-      '❌ ' + escapeHtml(err.message) +
-      '<br><button class="btn btn-ghost" style="margin-top:8px" ' +
-        'onclick="startAzurePronunciation()">🔁 ลองใหม่</button>';
-  });
+    });
+  };
+
+  reader.readAsDataURL(blob);
 }
 
-/* ----------------------------------------------------------------
- * renderAzureResult() — displays pronunciation scores
- * ---------------------------------------------------------------- */
-function renderAzureResult(panel, res) {
-  var debugHtml = res.debugLog
-    ? '<details style="margin-top:8px"><summary style="font-size:12px;color:#888;cursor:pointer">Debug Log</summary>' +
-      '<pre style="font-size:10px;overflow:auto;max-height:200px;background:#f5f5f5;padding:8px;border-radius:4px">' +
-      escapeHtml(res.debugLog) + '</pre></details>'
-    : '';
-
-  if (!res.success) {
-    panel.innerHTML =
-      '<p>❌ ' + escapeHtml(res.message || 'ประเมินผลไม่สำเร็จ') + '</p>' +
-      debugHtml +
-      '<div style="display:flex;gap:8px;margin-top:10px">' +
-        '<button class="btn btn-ghost" style="flex:1" onclick="startAzurePronunciation()">🔁 ลองใหม่</button>' +
-        '<button class="btn btn-ghost" style="flex:1" onclick="submitRecordingToTeacher()">📋 ส่งครูตรวจ</button>' +
-      '</div>';
-    return;
-  }
-
-  function sc(score) {
-    return score >= 80 ? 'color:#2F7A5E' : score >= 60 ? 'color:#B5781F' : 'color:#C8472E';
-  }
-
-  var fVal = res.fluencyScore      != null ? res.fluencyScore      : '—';
-  var cVal = res.completenessScore != null ? res.completenessScore : '—';
-
-  panel.innerHTML =
-    '<div class="azure-result">' +
-      '<h3 style="margin:0 0 8px">🤖 ผลประเมินการออกเสียง</h3>' +
-      '<p>คำที่ฝึก: <span class="hanzi" style="font-size:22px">' + escapeHtml(res.referenceText) + '</span></p>' +
-      (res.recognizedText
-        ? '<p>ระบบจับได้: <b>' + escapeHtml(res.recognizedText) + '</b></p>'
-        : '<p style="color:#B5781F">⚠️ ระบบจับเสียงไม่ได้ — ลองพูดให้ชัดขึ้น</p>') +
-      '<div class="score-grid" style="margin:12px 0">' +
-        '<div class="score-item"><span class="score-val" style="' + sc(res.pronunciationScore) + '">' + res.pronunciationScore + '</span><span class="score-lbl">คะแนนรวม</span></div>' +
-        '<div class="score-item"><span class="score-val" style="' + sc(res.accuracyScore)      + '">' + res.accuracyScore      + '</span><span class="score-lbl">ความถูกต้อง</span></div>' +
-        '<div class="score-item"><span class="score-val">' + fVal + '</span><span class="score-lbl">ความคล่อง</span></div>' +
-        '<div class="score-item"><span class="score-val">' + cVal + '</span><span class="score-lbl">ความครบถ้วน</span></div>' +
-      '</div>' +
-      debugHtml +
-      '<div style="display:flex;gap:8px;margin-top:10px">' +
-        '<button class="btn btn-ghost" style="flex:1" onclick="startAzurePronunciation()">🔁 ฝึกอีกครั้ง</button>' +
-        '<button class="btn btn-ghost" style="flex:1" onclick="submitRecordingToTeacher()">📋 ส่งครูตรวจ</button>' +
-      '</div>' +
-    '</div>';
-}
-
-/* ----------------------------------------------------------------
- * _cleanupRecordState() — release all WebAudio resources
- * ---------------------------------------------------------------- */
 function _cleanupRecordState() {
   clearTimeout(RecordState.timerRef);
-  try { if (RecordState.source)       RecordState.source.disconnect(); }       catch (e) {}
-  try { if (RecordState.processor)    RecordState.processor.disconnect(); }    catch (e) {}
-  try { if (RecordState.keepAliveOsc) RecordState.keepAliveOsc.stop(); }       catch (e) {}
-  try { if (RecordState.audioCtx)     RecordState.audioCtx.close(); }          catch (e) {}
-  if (RecordState.stream) {
-    RecordState.stream.getTracks().forEach(function (t) { t.stop(); });
-  }
-  if (RecordState.wavBlobUrl) URL.revokeObjectURL(RecordState.wavBlobUrl);
-
-  RecordState.audioCtx      = null;
+  try { if (RecordState.mediaRecorder && RecordState.mediaRecorder.state !== 'inactive') RecordState.mediaRecorder.stop(); } catch(e) {}
+  if (RecordState.stream) RecordState.stream.getTracks().forEach(function(t) { t.stop(); });
+  if (RecordState.blobUrl) URL.revokeObjectURL(RecordState.blobUrl);
+  RecordState.chunks        = [];
   RecordState.stream        = null;
-  RecordState.source        = null;
-  RecordState.processor     = null;
-  RecordState.keepAliveOsc  = null;
-  RecordState.keepAliveGain = null;
+  RecordState.mediaRecorder = null;
   RecordState.isRecording   = false;
-  RecordState.pcmChunks     = [];
-  RecordState.wavBuffer     = null;
-  RecordState.wavBlobUrl    = null;
+  RecordState.blobUrl       = null;
 }
 
-/* ================================================================
- * Teacher Dashboard — Recording Review Tab
- * Injected dynamically — no changes needed to index.html
- * ================================================================ */
+/* ============================================================
+ * Teacher Dashboard — แท็บตรวจการออกเสียง
+ * ============================================================ */
 
 function injectTeacherGradingTab() {
   var tabsEl = document.querySelector('.tabs');
@@ -1569,12 +1273,12 @@ function loadRecordings() {
   callApi('getRecordingsForTeacher', { token: AppState.token })
     .then(function (res) {
       if (!res.success) { onApiError(res); return; }
-      panel.innerHTML = renderRecordingsPanel(res.recordings);
+      panel.innerHTML = _renderRecordingsTable(res.recordings);
     })
     .catch(onApiError);
 }
 
-function renderRecordingsPanel(recordings) {
+function _renderRecordingsTable(recordings) {
   var ungraded = recordings.filter(function (r) { return !r.isGraded; }).length;
 
   var html =
@@ -1592,12 +1296,10 @@ function renderRecordingsPanel(recordings) {
     return html + '<div class="empty-state">ยังไม่มีเสียงที่นักเรียนส่งมา</div>';
   }
 
-  html +=
-    '<div class="table-wrap" style="overflow-x:auto"><table>' +
+  html += '<div class="table-wrap" style="overflow-x:auto"><table>' +
     '<thead><tr>' +
-      '<th>ชื่อนักเรียน</th><th>ห้อง</th><th>คำที่พูด</th>' +
-      '<th>วันที่</th><th>ฟังเสียง</th>' +
-      '<th>คะแนน (0-100)</th><th>หมายเหตุ</th><th>บันทึก</th>' +
+      '<th>ชื่อ</th><th>ห้อง</th><th>คำที่พูด</th><th>วันที่</th>' +
+      '<th>ฟังเสียง</th><th>คะแนน</th><th>หมายเหตุ</th><th></th>' +
     '</tr></thead><tbody>';
 
   recordings.forEach(function (r) {
@@ -1605,40 +1307,31 @@ function renderRecordingsPanel(recordings) {
     var audioUrl = r.driveFileId
       ? 'https://drive.google.com/uc?export=download&id=' + encodeURIComponent(r.driveFileId)
       : escapeHtml(r.driveUrl || '');
-    var rowStyle = r.isGraded ? '' : ' style="background:#FFFBF0"';
+    var rowBg = r.isGraded ? '' : ' style="background:#FFFBF0"';
 
     html +=
-      '<tr id="row-' + rid + '"' + rowStyle + '>' +
-        '<td>' + escapeHtml(r.studentName || r.studentId) + '</td>' +
-        '<td>' + escapeHtml(r.classRoom   || '-')         + '</td>' +
-        '<td>' +
-          '<span class="hanzi" style="font-size:18px">' + escapeHtml(r.targetWord || '') + '</span> ' +
-          '<small style="color:#888">' + escapeHtml(r.pinyin || '') + '</small>' +
-        '</td>' +
-        '<td style="white-space:nowrap;font-size:12px">' + formatDateThai(r.timestamp) + '</td>' +
+      '<tr id="row-' + rid + '"' + rowBg + '>' +
+        '<td>' + escapeHtml(r.studentName) + '</td>' +
+        '<td>' + escapeHtml(r.classRoom)   + '</td>' +
+        '<td><span class="hanzi" style="font-size:18px">' + escapeHtml(r.targetWord || '') + '</span> ' +
+            '<small style="color:#888">' + escapeHtml(r.pinyin || '') + '</small></td>' +
+        '<td style="font-size:12px;white-space:nowrap">' + formatDateThai(r.timestamp) + '</td>' +
         '<td>' +
           (audioUrl
-            ? '<audio controls src="' + audioUrl + '" preload="none" style="width:200px;height:32px"></audio>' +
-              '<br><a href="' + escapeHtml(r.driveUrl || '') + '" target="_blank" rel="noopener" style="font-size:11px">เปิด Drive</a>'
-            : '<span style="color:#888;font-size:12px">ไม่มีลิงก์</span>'
-          ) +
+            ? '<audio controls src="' + audioUrl + '" preload="none" style="width:180px;height:32px"></audio>' +
+              '<br><a href="' + escapeHtml(r.driveUrl || '') + '" target="_blank" ' +
+                'rel="noopener" style="font-size:11px">เปิด Drive</a>'
+            : '<span style="color:#888;font-size:12px">ไม่มีลิงก์</span>') +
         '</td>' +
-        '<td>' +
-          '<input type="number" id="score-' + rid + '" min="0" max="100" ' +
+        '<td><input type="number" id="score-' + rid + '" min="0" max="100" ' +
             'value="' + escapeHtml(String(r.teacherScore || '')) + '" placeholder="0-100" ' +
-            'style="width:72px;padding:6px;border:1px solid #E4DFD2;border-radius:6px">' +
-        '</td>' +
-        '<td>' +
-          '<input type="text" id="notes-' + rid + '" ' +
+            'style="width:70px;padding:6px;border:1px solid #E4DFD2;border-radius:6px"></td>' +
+        '<td><input type="text" id="notes-' + rid + '" ' +
             'value="' + escapeHtml(r.teacherNotes || '') + '" placeholder="หมายเหตุ..." ' +
-            'style="width:150px;padding:6px;border:1px solid #E4DFD2;border-radius:6px">' +
-        '</td>' +
-        '<td>' +
-          '<button class="btn ' + (r.isGraded ? 'btn-ghost' : 'btn-primary') + '" ' +
+            'style="width:140px;padding:6px;border:1px solid #E4DFD2;border-radius:6px"></td>' +
+        '<td><button class="btn ' + (r.isGraded ? 'btn-ghost' : 'btn-primary') + '" ' +
             'id="grade-btn-' + rid + '" onclick="saveGrade(\'' + rid + '\')">' +
-            (r.isGraded ? '✓ บันทึกแล้ว' : 'บันทึก') +
-          '</button>' +
-        '</td>' +
+            (r.isGraded ? '✓ บันทึกแล้ว' : 'บันทึก') + '</button></td>' +
       '</tr>';
   });
 
@@ -1652,16 +1345,14 @@ function saveGrade(recordingId) {
   var notes   = notesEl ? notesEl.value.trim() : '';
 
   if (score === '' || isNaN(Number(score)) || Number(score) < 0 || Number(score) > 100) {
-    showToast('กรุณากรอกคะแนน 0-100');
-    return;
+    showToast('กรุณากรอกคะแนน 0-100'); return;
   }
 
   var btn = document.getElementById('grade-btn-' + recordingId);
   if (btn) { btn.disabled = true; btn.textContent = 'กำลังบันทึก...'; }
 
   callApi('gradeRecording', {
-    token: AppState.token, recordingId: recordingId,
-    score: score, notes: notes
+    token: AppState.token, recordingId: recordingId, score: score, notes: notes
   })
   .then(function (res) {
     if (!res.success) {
